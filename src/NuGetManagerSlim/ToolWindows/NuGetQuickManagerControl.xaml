@@ -1,0 +1,422 @@
+<UserControl x:Class="NuGetManagerSlim.ToolWindows.NuGetQuickManagerControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:vm="clr-namespace:NuGetManagerSlim.ViewModels"
+             mc:Ignorable="d"
+             d:DesignHeight="700" d:DesignWidth="420">
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
+        <Style x:Key="FilterToggleStyle" TargetType="ToggleButton">
+            <Setter Property="Padding" Value="8,3" />
+            <Setter Property="Margin" Value="2,0" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+        <Style x:Key="MutedTextStyle" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}" />
+            <Setter Property="FontSize" Value="11" />
+        </Style>
+        <Style x:Key="VersionBadgeStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="10" />
+            <Setter Property="Padding" Value="3,1" />
+            <Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}" />
+        </Style>
+    </UserControl.Resources>
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="180" MinHeight="100" MaxHeight="350" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- A: Search box -->
+        <Border Grid.Row="0" BorderThickness="0,0,0,1"
+                BorderBrush="{DynamicResource {x:Static SystemColors.ControlDarkBrushKey}}"
+                Padding="6,4">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Grid Grid.Column="0">
+                    <TextBox x:Name="SearchBox"
+                             Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+                             VerticalContentAlignment="Center"
+                             Padding="4,3"
+                             BorderThickness="1"
+                             AutomationProperties.Name="Search packages"
+                             KeyDown="SearchBox_KeyDown" />
+                    <TextBlock IsHitTestVisible="False"
+                               Text="Search packages…"
+                               VerticalAlignment="Center"
+                               Padding="7,0,0,0"
+                               Foreground="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding SearchText}" Value="">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding SearchText}" Value="{x:Null}">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </Grid>
+                <Button Grid.Column="1" Content="&#x1F50D;" Margin="4,0,0,0" Padding="6,3"
+                        Command="{Binding SearchCommand}"
+                        AutomationProperties.Name="Search" />
+            </Grid>
+        </Border>
+
+        <!-- B + C + D: Project scope, Filter toggles, Source selector -->
+        <Border Grid.Row="1" BorderThickness="0,0,0,1"
+                BorderBrush="{DynamicResource {x:Static SystemColors.ControlDarkBrushKey}}"
+                Padding="6,4">
+            <WrapPanel Orientation="Horizontal">
+                <!-- B: Project scope dropdown -->
+                <ComboBox x:Name="ScopeCombo"
+                          ItemsSource="{Binding ProjectScopes}"
+                          SelectedItem="{Binding SelectedScope}"
+                          DisplayMemberPath="DisplayName"
+                          MinWidth="120"
+                          Margin="0,0,6,2"
+                          AutomationProperties.Name="Project scope"
+                          ToolTip="Select a project or entire solution" />
+
+                <!-- C: Filter toggles -->
+                <ToggleButton Content="Installed"
+                              IsChecked="{Binding FilterInstalled}"
+                              Style="{StaticResource FilterToggleStyle}"
+                              AutomationProperties.Name="Show installed packages"
+                              Margin="0,0,2,2" />
+                <ToggleButton Content="Updates"
+                              IsChecked="{Binding FilterUpdates}"
+                              Style="{StaticResource FilterToggleStyle}"
+                              AutomationProperties.Name="Show packages with updates"
+                              Margin="0,0,2,2" />
+                <ToggleButton Content="Prerelease"
+                              IsChecked="{Binding FilterPrerelease}"
+                              Style="{StaticResource FilterToggleStyle}"
+                              AutomationProperties.Name="Include prerelease versions"
+                              Margin="0,0,2,2" />
+
+                <!-- D: Source selector toggle -->
+                <ToggleButton Content="Source &#x25BC;"
+                              IsChecked="{Binding IsSourcePanelOpen}"
+                              Style="{StaticResource FilterToggleStyle}"
+                              AutomationProperties.Name="Toggle source panel"
+                              Margin="4,0,0,2" />
+            </WrapPanel>
+        </Border>
+
+        <!-- E: Package list -->
+        <Grid Grid.Row="2">
+            <!-- Loading indicator -->
+            <TextBlock Text="Loading…"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"
+                       Visibility="{Binding IsLoading, Converter={StaticResource BoolToVis}}" />
+
+            <!-- Empty state -->
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
+                        Visibility="{Binding IsEmptyState, Converter={StaticResource BoolToVis}}">
+                <TextBlock Text="{Binding EmptyStateMessage}" TextAlignment="Center" TextWrapping="Wrap" Margin="20" />
+            </StackPanel>
+
+            <!-- Package list -->
+            <ListBox x:Name="PackageListBox"
+                     ItemsSource="{Binding Packages}"
+                     SelectedItem="{Binding SelectedPackage}"
+                     VirtualizingStackPanel.IsVirtualizing="True"
+                     VirtualizingStackPanel.VirtualizationMode="Recycling"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                     SelectionChanged="PackageListBox_SelectionChanged"
+                     Visibility="{Binding HasPackages, Converter={StaticResource BoolToVis}}"
+                     AutomationProperties.Name="Package list"
+                     HorizontalContentAlignment="Stretch">
+                <ListBox.ItemTemplate>
+                    <DataTemplate DataType="{x:Type vm:PackageRowViewModel}">
+                        <Grid Margin="4,3">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="32" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition />
+                                <RowDefinition />
+                            </Grid.RowDefinitions>
+
+                            <!-- Icon / spinner -->
+                            <Border Grid.Column="0" Grid.RowSpan="2"
+                                    Width="28" Height="28"
+                                    Background="{DynamicResource {x:Static SystemColors.ControlBrushKey}}"
+                                    CornerRadius="4"
+                                    VerticalAlignment="Center">
+                                <TextBlock Text="&#x1F4E6;" FontSize="16"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Border>
+
+                            <!-- Package ID + version -->
+                            <StackPanel Grid.Column="1" Grid.Row="0" Orientation="Horizontal" Margin="6,0,0,0">
+                                <TextBlock Text="{Binding PackageId}" FontWeight="SemiBold" FontSize="13"
+                                           TextTrimming="CharacterEllipsis"
+                                           Foreground="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}" />
+                                <TextBlock Text=" &#x2713;" Foreground="Green"
+                                           Visibility="{Binding IsInstalled, Converter={StaticResource BoolToVis}}"
+                                           ToolTip="Installed" />
+                                <TextBlock Text=" [pre]" FontSize="10" VerticalAlignment="Center"
+                                           Foreground="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}"
+                                           Visibility="{Binding IsPrerelease, Converter={StaticResource BoolToVis}}" />
+                            </StackPanel>
+
+                            <!-- Version info + update badge -->
+                            <StackPanel Grid.Column="1" Grid.Row="1" Orientation="Horizontal" Margin="6,1,0,0">
+                                <TextBlock Text="{Binding InstalledVersionDisplay}"
+                                           Style="{StaticResource MutedTextStyle}" />
+                                <TextBlock Text="{Binding UpdateBadge}" Foreground="#0078D4"
+                                           Style="{StaticResource VersionBadgeStyle}"
+                                           Visibility="{Binding HasUpdate, Converter={StaticResource BoolToVis}}" />
+                                <TextBlock Text="{Binding AuthorDisplay}"
+                                           Style="{StaticResource MutedTextStyle}" Margin="8,0,0,0" />
+                            </StackPanel>
+
+                            <!-- Source badge + action button -->
+                            <StackPanel Grid.Column="2" Grid.RowSpan="2" Orientation="Vertical"
+                                        VerticalAlignment="Center" Margin="4,0,2,0">
+                                <TextBlock Text="{Binding SourceBadge}"
+                                           Style="{StaticResource MutedTextStyle}"
+                                           HorizontalAlignment="Right" Margin="0,0,0,2" />
+                                <Button Content="Update"
+                                        Command="{Binding DataContext.QuickUpdateCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                        CommandParameter="{Binding}"
+                                        Padding="6,2" FontSize="11"
+                                        Visibility="{Binding HasUpdate, Converter={StaticResource BoolToVis}}"
+                                        AutomationProperties.Name="{Binding UpdateButtonAccessibleName}" />
+                            </StackPanel>
+                        </Grid>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+
+                <!-- Transitive section header -->
+                <ListBox.GroupStyle>
+                    <GroupStyle>
+                        <GroupStyle.HeaderTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding Name}"
+                                           Style="{StaticResource MutedTextStyle}"
+                                           FontStyle="Italic"
+                                           Padding="4,6,0,2" />
+                            </DataTemplate>
+                        </GroupStyle.HeaderTemplate>
+                    </GroupStyle>
+                </ListBox.GroupStyle>
+            </ListBox>
+
+            <!-- Remote-loading spinner at bottom -->
+            <Border VerticalAlignment="Bottom" Padding="4"
+                    Visibility="{Binding IsRemoteLoading, Converter={StaticResource BoolToVis}}">
+                <TextBlock Text="&#x27F3; Loading remote results…"
+                           Style="{StaticResource MutedTextStyle}"
+                           HorizontalAlignment="Center" />
+            </Border>
+        </Grid>
+
+        <!-- Splitter between list and detail -->
+        <GridSplitter Grid.Row="3" Height="4" HorizontalAlignment="Stretch"
+                      Background="{DynamicResource {x:Static SystemColors.ControlBrushKey}}"
+                      ShowsPreview="True" />
+
+        <!-- F: Detail pane -->
+        <Border Grid.Row="4" BorderThickness="0,1,0,1"
+                BorderBrush="{DynamicResource {x:Static SystemColors.ControlDarkBrushKey}}"
+                Visibility="{Binding HasSelectedPackage, Converter={StaticResource BoolToVis}}">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="8,6">
+                <StackPanel>
+                    <!-- Package title + version dropdown -->
+                    <Grid Margin="0,0,0,6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0"
+                                   Text="{Binding Detail.PackageId}"
+                                   FontSize="15" FontWeight="Bold"
+                                   TextTrimming="CharacterEllipsis" />
+                        <ComboBox Grid.Column="1"
+                                  ItemsSource="{Binding Detail.AvailableVersions}"
+                                  SelectedItem="{Binding Detail.SelectedVersion}"
+                                  MinWidth="100" Margin="8,0,0,0"
+                                  AutomationProperties.Name="Package version" />
+                    </Grid>
+
+                    <!-- Description -->
+                    <TextBlock Text="{Binding Detail.Description}"
+                               TextWrapping="Wrap"
+                               Style="{StaticResource MutedTextStyle}"
+                               Margin="0,0,0,6" />
+
+                    <!-- Metadata row -->
+                    <WrapPanel Margin="0,0,0,6">
+                        <TextBlock Style="{StaticResource MutedTextStyle}" Margin="0,0,12,0">
+                            <Run Text="License: " />
+                            <Hyperlink Command="{Binding Detail.OpenLicenseCommand}">
+                                <Run Text="{Binding Detail.License}" />
+                            </Hyperlink>
+                        </TextBlock>
+                        <TextBlock Style="{StaticResource MutedTextStyle}" Margin="0,0,12,0">
+                            <Run Text="Downloads: " /><Run Text="{Binding Detail.DownloadCountDisplay}" />
+                        </TextBlock>
+                        <TextBlock Style="{StaticResource MutedTextStyle}">
+                            <Run Text="Authors: " /><Run Text="{Binding Detail.Authors}" />
+                        </TextBlock>
+                    </WrapPanel>
+
+                    <!-- Project membership -->
+                    <TextBlock Text="Projects:" FontWeight="SemiBold" FontSize="11" Margin="0,0,0,3" />
+                    <ItemsControl ItemsSource="{Binding Detail.ProjectMemberships}" Margin="0,0,0,6">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal" Margin="0,1">
+                                    <CheckBox IsChecked="{Binding IsSelected}"
+                                              Content="{Binding DisplayText}"
+                                              FontSize="11" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <!-- Action buttons -->
+                    <WrapPanel Margin="0,0,0,6">
+                        <Button Content="Install"
+                                Command="{Binding Detail.InstallCommand}"
+                                Padding="10,4" Margin="0,0,4,0"
+                                Visibility="{Binding Detail.CanInstall, Converter={StaticResource BoolToVis}}"
+                                AutomationProperties.Name="Install package" />
+                        <Button Content="Update"
+                                Command="{Binding Detail.UpdateCommand}"
+                                Padding="10,4" Margin="0,0,4,0"
+                                Visibility="{Binding Detail.CanUpdate, Converter={StaticResource BoolToVis}}"
+                                AutomationProperties.Name="Update package" />
+                        <Button Content="Update All Projects"
+                                Command="{Binding Detail.UpdateAllProjectsCommand}"
+                                Padding="10,4" Margin="0,0,4,0"
+                                Visibility="{Binding Detail.CanUpdateAllProjects, Converter={StaticResource BoolToVis}}"
+                                AutomationProperties.Name="Update package in all projects" />
+                        <Button Content="Uninstall"
+                                Command="{Binding Detail.UninstallCommand}"
+                                Padding="10,4"
+                                Visibility="{Binding Detail.CanUninstall, Converter={StaticResource BoolToVis}}"
+                                AutomationProperties.Name="Uninstall package" />
+                    </WrapPanel>
+
+                    <!-- README preview -->
+                    <Expander Header="README" IsExpanded="False" Margin="0,0,0,4">
+                        <StackPanel>
+                            <TextBlock Text="{Binding Detail.ReadmePreview}"
+                                       TextWrapping="Wrap"
+                                       Style="{StaticResource MutedTextStyle}"
+                                       MaxHeight="120"
+                                       Margin="0,4,0,4" />
+                            <TextBlock>
+                                <Hyperlink Command="{Binding Detail.OpenNuGetOrgCommand}">View on nuget.org</Hyperlink>
+                            </TextBlock>
+                        </StackPanel>
+                    </Expander>
+
+                    <!-- Dependency tree -->
+                    <Expander Header="Dependencies" IsExpanded="False">
+                        <ItemsControl ItemsSource="{Binding Detail.Dependencies}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding DisplayText}"
+                                               Style="{StaticResource MutedTextStyle}"
+                                               Margin="4,1" />
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </Expander>
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+
+        <!-- G: Status bar -->
+        <Border Grid.Row="5" BorderThickness="0,1,0,0"
+                BorderBrush="{DynamicResource {x:Static SystemColors.ControlDarkBrushKey}}"
+                Padding="6,3">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0"
+                           Text="{Binding StatusMessage}"
+                           TextTrimming="CharacterEllipsis"
+                           VerticalAlignment="Center"
+                           FontSize="11"
+                           Foreground="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"
+                           AutomationProperties.LiveSetting="Polite" />
+                <Button Grid.Column="1" Content="View log"
+                        Command="{Binding ToggleLogCommand}"
+                        Style="{StaticResource {x:Static ToolBar.ButtonStyleKey}}"
+                        Margin="4,0"
+                        AutomationProperties.Name="View operation log" />
+                <Button Grid.Column="2" Content="&#x21BB; Refresh"
+                        Command="{Binding RefreshCommand}"
+                        Style="{StaticResource {x:Static ToolBar.ButtonStyleKey}}"
+                        AutomationProperties.Name="Refresh package list" />
+            </Grid>
+        </Border>
+
+        <!-- H: Source panel (collapsed by default) -->
+        <Border Grid.Row="6" BorderThickness="0,1,0,0"
+                BorderBrush="{DynamicResource {x:Static SystemColors.ControlDarkBrushKey}}"
+                Padding="6,4"
+                Visibility="{Binding IsSourcePanelOpen, Converter={StaticResource BoolToVis}}">
+            <StackPanel>
+                <TextBlock Text="Package Sources" FontWeight="SemiBold" FontSize="11" Margin="0,0,0,4" />
+                <ItemsControl ItemsSource="{Binding PackageSources}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Grid Margin="0,2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <CheckBox Grid.Column="0" IsChecked="{Binding IsEnabled}"
+                                          VerticalAlignment="Center" />
+                                <StackPanel Grid.Column="1" Margin="4,0">
+                                    <TextBlock Text="{Binding Name}" FontSize="11" />
+                                    <TextBlock Text="{Binding ErrorMessage}" FontSize="10"
+                                               Foreground="OrangeRed"
+                                               Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}"
+                                               TextWrapping="Wrap" />
+                                </StackPanel>
+                                <TextBlock Grid.Column="2" Text="&#x26A0;"
+                                           Foreground="OrangeRed" VerticalAlignment="Center"
+                                           Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}"
+                                           ToolTip="{Binding ErrorMessage}" />
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <Button Content="+ Add source" HorizontalAlignment="Left"
+                        Command="{Binding AddSourceCommand}"
+                        Margin="0,4,0,0" Padding="6,2" FontSize="11"
+                        AutomationProperties.Name="Add package source" />
+            </StackPanel>
+        </Border>
+    </Grid>
+</UserControl>

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
+  <Metadata>
+	<Identity Id="NuGetManagerSlim.02b52d4a-302c-45d8-9d1f-9cc4759f30be" Version="1.0" Language="en-US" Publisher="NuGetManagerSlim" />
+	<DisplayName>NuGet Quick Manager</DisplayName>
+	<Description xml:space="preserve">An alternative NuGet Package Manager for Visual Studio — unified, async-first, with inline progress and per-framework version state.</Description>
+	<Tags>nuget, package manager, packages</Tags>
+  </Metadata>
+  <Installation>
+	<InstallationTarget Id="Microsoft.VisualStudio.Community" Version="[17.0,)" />
+	<InstallationTarget Id="Microsoft.VisualStudio.Professional" Version="[17.0,)" />
+	<InstallationTarget Id="Microsoft.VisualStudio.Enterprise" Version="[17.0,)" />
+  </Installation>
+  <Dependencies>
+	<Dependency Id="Microsoft.Framework.NDP" DisplayName=".NET Framework" d:Source="Manual" Version="[4.8,)" />
+  </Dependencies>
+  <Prerequisites>
+	<Prerequisite Id="Microsoft.VisualStudio.Component.CoreEditor" Version="[17.0,)" DisplayName="Visual Studio core editor" />
+  </Prerequisites>
+  <Assets>
+	<Asset Type="Microsoft.VisualStudio.VsPackage" d:Source="Project" d:ProjectName="%CurrentProject%" Path="|NuGetManagerSlim;PkgdefProjectOutputGroup|" />
+  </Assets>
+</PackageManifest>
