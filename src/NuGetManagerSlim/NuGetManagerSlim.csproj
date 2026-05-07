@@ -1,34 +1,76 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
   <PropertyGroup>
 	<TargetFramework>net48</TargetFramework>
-	<UseWPF>true</UseWPF>
-	<RootNamespace>NuGetManagerSlim</RootNamespace>
-	<AssemblyName>NuGetManagerSlim</AssemblyName>
-	<GenerateAssemblyInfo>false</GenerateAssemblyInfo>
 	<Nullable>enable</Nullable>
 	<LangVersion>latest</LangVersion>
-	<EnableDefaultItems>true</EnableDefaultItems>
-	<OutputType>Library</OutputType>
+	<UseWPF>true</UseWPF>
+
+	<!-- VSIX settings -->
+	<VSSDKBuildToolsAutoSetup>true</VSSDKBuildToolsAutoSetup>
+	<VsixDeployOnDebug>true</VsixDeployOnDebug>
 	<VSSDKTargetPlatformRegRootSuffix>Exp</VSSDKTargetPlatformRegRootSuffix>
 	<GeneratePkgDefFile>true</GeneratePkgDefFile>
-	<IncludeAssemblyInVSIXContainer>true</IncludeAssemblyInVSIXContainer>
-	<IncludeDebugSymbolsInVSIXContainer>true</IncludeDebugSymbolsInVSIXContainer>
-	<IncludeDebugSymbolsInLocalVSIXDeployment>true</IncludeDebugSymbolsInLocalVSIXDeployment>
-	<CopyBuildOutputToOutputDirectory>true</CopyBuildOutputToOutputDirectory>
-	<CopyOutputSymbolsToOutputDirectory>false</CopyOutputSymbolsToOutputDirectory>
+	<UseCodebase>true</UseCodebase>
+
 	<!-- Disable WPF temp assembly generation so the project can be referenced by test projects
 		 without requiring Visual Studio SDK assemblies to be present on the build machine. -->
 	<GenerateTemporaryTargetAssembly>false</GenerateTemporaryTargetAssembly>
   </PropertyGroup>
+
   <ItemGroup>
-	<PackageReference Include="Community.VisualStudio.Toolkit.17" Version="17.*" />
-	<PackageReference Include="Microsoft.VSSDK.BuildTools" Version="17.*" PrivateAssets="All" />
+	<ProjectCapability Include="CreateVsixContainer" />
+  </ItemGroup>
+
+  <!-- VSCT command table -->
+  <ItemGroup>
+	<AvailableItemName Include="VSCTCompile" />
+  </ItemGroup>
+  <ItemGroup>
+	<None Remove="VSCommandTable.vsct" />
+	<VSCTCompile Include="VSCommandTable.vsct">
+	  <ResourceName>Menus.ctmenu</ResourceName>
+	  <Generator>VsctGenerator</Generator>
+	  <LastGenOutput>VSCommandTable.cs</LastGenOutput>
+	</VSCTCompile>
+  </ItemGroup>
+
+  <!-- Auto-generated files (use Update because SDK auto-includes *.cs) -->
+  <ItemGroup>
+	<Compile Update="VSCommandTable.cs">
+	  <AutoGen>True</AutoGen>
+	  <DesignTime>True</DesignTime>
+	  <DependentUpon>VSCommandTable.vsct</DependentUpon>
+	</Compile>
+	<Compile Update="source.extension.cs">
+	  <AutoGen>True</AutoGen>
+	  <DesignTime>True</DesignTime>
+	  <DependentUpon>source.extension.vsixmanifest</DependentUpon>
+	</Compile>
+  </ItemGroup>
+
+  <!-- VSIX manifest -->
+  <ItemGroup>
+	<None Update="source.extension.vsixmanifest">
+	  <SubType>Designer</SubType>
+	  <Generator>VsixManifestGenerator</Generator>
+	  <LastGenOutput>source.extension.cs</LastGenOutput>
+	</None>
+	</ItemGroup>
+
+  <ItemGroup>
+	<PackageReference Include="Community.VisualStudio.Toolkit.17" Version="17.*" ExcludeAssets="Runtime">
+	  <IncludeAssets>compile; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+	</PackageReference>
+	<PackageReference Include="Community.VisualStudio.VSCT" Version="16.0.29.14">
+	  <PrivateAssets>all</PrivateAssets>
+	  <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+	</PackageReference>
+	<PackageReference Include="Microsoft.VSSDK.BuildTools" Version="18.5.40034">
+	  <PrivateAssets>all</PrivateAssets>
+	</PackageReference>
 	<PackageReference Include="NuGet.Protocol" Version="6.*" />
 	<PackageReference Include="CommunityToolkit.Mvvm" Version="8.*" />
   </ItemGroup>
-  <ItemGroup>
-	<None Include="source.extension.vsixmanifest">
-	  <SubType>Designer</SubType>
-	</None>
-  </ItemGroup>
+
 </Project>

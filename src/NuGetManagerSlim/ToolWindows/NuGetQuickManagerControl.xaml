@@ -27,63 +27,20 @@
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="180" MinHeight="100" MaxHeight="350" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <!-- A: Search box -->
+        <!-- Project scope + Source selector
+             (Filter toggles and search live in the native VS toolbar / search bar provided by the ToolWindowPane.) -->
         <Border Grid.Row="0" BorderThickness="0,0,0,1"
                 BorderBrush="{DynamicResource {x:Static SystemColors.ControlDarkBrushKey}}"
                 Padding="6,4">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <Grid Grid.Column="0">
-                    <TextBox x:Name="SearchBox"
-                             Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
-                             VerticalContentAlignment="Center"
-                             Padding="4,3"
-                             BorderThickness="1"
-                             AutomationProperties.Name="Search packages"
-                             KeyDown="SearchBox_KeyDown" />
-                    <TextBlock IsHitTestVisible="False"
-                               Text="Search packages…"
-                               VerticalAlignment="Center"
-                               Padding="7,0,0,0"
-                               Foreground="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}">
-                        <TextBlock.Style>
-                            <Style TargetType="TextBlock">
-                                <Setter Property="Visibility" Value="Collapsed" />
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding SearchText}" Value="">
-                                        <Setter Property="Visibility" Value="Visible" />
-                                    </DataTrigger>
-                                    <DataTrigger Binding="{Binding SearchText}" Value="{x:Null}">
-                                        <Setter Property="Visibility" Value="Visible" />
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </TextBlock.Style>
-                    </TextBlock>
-                </Grid>
-                <Button Grid.Column="1" Content="&#x1F50D;" Margin="4,0,0,0" Padding="6,3"
-                        Command="{Binding SearchCommand}"
-                        AutomationProperties.Name="Search" />
-            </Grid>
-        </Border>
-
-        <!-- B + C + D: Project scope, Filter toggles, Source selector -->
-        <Border Grid.Row="1" BorderThickness="0,0,0,1"
-                BorderBrush="{DynamicResource {x:Static SystemColors.ControlDarkBrushKey}}"
-                Padding="6,4">
             <WrapPanel Orientation="Horizontal">
-                <!-- B: Project scope dropdown -->
                 <ComboBox x:Name="ScopeCombo"
                           ItemsSource="{Binding ProjectScopes}"
                           SelectedItem="{Binding SelectedScope}"
@@ -93,24 +50,6 @@
                           AutomationProperties.Name="Project scope"
                           ToolTip="Select a project or entire solution" />
 
-                <!-- C: Filter toggles -->
-                <ToggleButton Content="Installed"
-                              IsChecked="{Binding FilterInstalled}"
-                              Style="{StaticResource FilterToggleStyle}"
-                              AutomationProperties.Name="Show installed packages"
-                              Margin="0,0,2,2" />
-                <ToggleButton Content="Updates"
-                              IsChecked="{Binding FilterUpdates}"
-                              Style="{StaticResource FilterToggleStyle}"
-                              AutomationProperties.Name="Show packages with updates"
-                              Margin="0,0,2,2" />
-                <ToggleButton Content="Prerelease"
-                              IsChecked="{Binding FilterPrerelease}"
-                              Style="{StaticResource FilterToggleStyle}"
-                              AutomationProperties.Name="Include prerelease versions"
-                              Margin="0,0,2,2" />
-
-                <!-- D: Source selector toggle -->
                 <ToggleButton Content="Source &#x25BC;"
                               IsChecked="{Binding IsSourcePanelOpen}"
                               Style="{StaticResource FilterToggleStyle}"
@@ -120,7 +59,7 @@
         </Border>
 
         <!-- E: Package list -->
-        <Grid Grid.Row="2">
+        <Grid Grid.Row="1">
             <!-- Loading indicator -->
             <TextBlock Text="Loading…"
                        HorizontalAlignment="Center"
@@ -233,12 +172,12 @@
         </Grid>
 
         <!-- Splitter between list and detail -->
-        <GridSplitter Grid.Row="3" Height="4" HorizontalAlignment="Stretch"
+        <GridSplitter Grid.Row="2" Height="4" HorizontalAlignment="Stretch"
                       Background="{DynamicResource {x:Static SystemColors.ControlBrushKey}}"
                       ShowsPreview="True" />
 
         <!-- F: Detail pane -->
-        <Border Grid.Row="4" BorderThickness="0,1,0,1"
+        <Border Grid.Row="3" BorderThickness="0,1,0,1"
                 BorderBrush="{DynamicResource {x:Static SystemColors.ControlDarkBrushKey}}"
                 Visibility="{Binding HasSelectedPackage, Converter={StaticResource BoolToVis}}">
             <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="8,6">
@@ -351,7 +290,7 @@
         </Border>
 
         <!-- G: Status bar -->
-        <Border Grid.Row="5" BorderThickness="0,1,0,0"
+        <Border Grid.Row="4" BorderThickness="0,1,0,0"
                 BorderBrush="{DynamicResource {x:Static SystemColors.ControlDarkBrushKey}}"
                 Padding="6,3">
             <Grid>
@@ -380,7 +319,7 @@
         </Border>
 
         <!-- H: Source panel (collapsed by default) -->
-        <Border Grid.Row="6" BorderThickness="0,1,0,0"
+        <Border Grid.Row="5" BorderThickness="0,1,0,0"
                 BorderBrush="{DynamicResource {x:Static SystemColors.ControlDarkBrushKey}}"
                 Padding="6,4"
                 Visibility="{Binding IsSourcePanelOpen, Converter={StaticResource BoolToVis}}">
@@ -417,6 +356,45 @@
                         Margin="0,4,0,0" Padding="6,2" FontSize="11"
                         AutomationProperties.Name="Add package source" />
             </StackPanel>
+        </Border>
+
+        <!-- I: Operation log panel (toggled by status-bar "View log" button) -->
+        <Border Grid.Row="6" BorderThickness="0,1,0,0"
+                BorderBrush="{DynamicResource {x:Static SystemColors.ControlDarkBrushKey}}"
+                Padding="6,4"
+                MaxHeight="180"
+                Visibility="{Binding IsLogOpen, Converter={StaticResource BoolToVis}}">
+            <DockPanel>
+                <Grid DockPanel.Dock="Top" Margin="0,0,0,4">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0"
+                               Text="Operation log"
+                               FontWeight="SemiBold"
+                               FontSize="11" />
+                    <Button Grid.Column="1"
+                            Content="Close"
+                            Command="{Binding ToggleLogCommand}"
+                            Style="{StaticResource {x:Static ToolBar.ButtonStyleKey}}"
+                            FontSize="11"
+                            AutomationProperties.Name="Close operation log" />
+                </Grid>
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <ItemsControl ItemsSource="{Binding OperationLog}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding}"
+                                           FontFamily="Consolas"
+                                           FontSize="11"
+                                           TextWrapping="Wrap"
+                                           Margin="0,1" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </DockPanel>
         </Border>
     </Grid>
 </UserControl>

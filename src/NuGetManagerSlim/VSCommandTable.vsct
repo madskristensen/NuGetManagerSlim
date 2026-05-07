@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CommandTable xmlns="http://schemas.microsoft.com/VisualStudio/2005-10-18/CommandTable"
+			  xmlns:xs="http://www.w3.org/2001/XMLSchema">
+
+	<Extern href="stdidcmd.h" />
+	<Extern href="vsshlids.h" />
+	<Include href="KnownImageIds.vsct" />
+	<Include href="VSGlobals.vsct"/>
+
+	<Commands package="NuGetManagerSlim">
+
+		<Menus>
+			<Menu guid="NuGetManagerSlim" id="NuGetQuickManagerToolbar" type="ToolWindowToolbar">
+				<Strings>
+					<CommandName>NuGet Quick Manager Toolbar</CommandName>
+				</Strings>
+			</Menu>
+		</Menus>
+
+		<Groups>
+			<Group guid="NuGetManagerSlim" id="NuGetQuickManagerToolbarGroup" priority="0x0000">
+				<Parent guid="NuGetManagerSlim" id="NuGetQuickManagerToolbar" />
+			</Group>
+			<Group guid="NuGetManagerSlim" id="NuGetQuickManagerToolbarRefreshGroup" priority="0x0100">
+				<Parent guid="NuGetManagerSlim" id="NuGetQuickManagerToolbar" />
+			</Group>
+		</Groups>
+
+		<Buttons>
+			<Button guid="NuGetManagerSlim" id="OpenNuGetQuickManagerCommand" priority="0x0100" type="Button">
+				<Parent guid="VSMainMenu" id="View.DefineViewsGroup" />
+				<Icon guid="ImageCatalogGuid" id="NuGet" />
+				<CommandFlag>IconIsMoniker</CommandFlag>
+				<Strings>
+					<ButtonText>NuGet Quick Manager</ButtonText>
+					<ToolTipText>Open NuGet Quick Manager</ToolTipText>
+				</Strings>
+			</Button>
+
+			<Button guid="NuGetManagerSlim" id="FilterInstalledCommand" priority="0x0100" type="Button">
+				<Parent guid="NuGetManagerSlim" id="NuGetQuickManagerToolbarGroup" />
+				<Icon guid="ImageCatalogGuid" id="StatusOK" />
+				<CommandFlag>IconIsMoniker</CommandFlag>
+				<CommandFlag>TextChanges</CommandFlag>
+				<Strings>
+					<ButtonText>Installed</ButtonText>
+					<ToolTipText>Show only installed packages</ToolTipText>
+				</Strings>
+			</Button>
+
+			<Button guid="NuGetManagerSlim" id="FilterUpdatesCommand" priority="0x0200" type="Button">
+				<Parent guid="NuGetManagerSlim" id="NuGetQuickManagerToolbarGroup" />
+				<Icon guid="ImageCatalogGuid" id="Download" />
+				<CommandFlag>IconIsMoniker</CommandFlag>
+				<CommandFlag>TextChanges</CommandFlag>
+				<Strings>
+					<ButtonText>Updates</ButtonText>
+					<ToolTipText>Show only packages with available updates</ToolTipText>
+				</Strings>
+			</Button>
+
+			<Button guid="NuGetManagerSlim" id="FilterPrereleaseCommand" priority="0x0300" type="Button">
+				<Parent guid="NuGetManagerSlim" id="NuGetQuickManagerToolbarGroup" />
+				<Icon guid="ImageCatalogGuid" id="StatusInformation" />
+				<CommandFlag>IconIsMoniker</CommandFlag>
+				<CommandFlag>TextChanges</CommandFlag>
+				<Strings>
+					<ButtonText>Prerelease</ButtonText>
+					<ToolTipText>Include prerelease versions</ToolTipText>
+				</Strings>
+			</Button>
+
+			<Button guid="NuGetManagerSlim" id="RefreshCommand" priority="0x0100" type="Button">
+				<Parent guid="NuGetManagerSlim" id="NuGetQuickManagerToolbarRefreshGroup" />
+				<Icon guid="ImageCatalogGuid" id="Refresh" />
+				<CommandFlag>IconIsMoniker</CommandFlag>
+				<Strings>
+					<ButtonText>Refresh</ButtonText>
+					<ToolTipText>Refresh the package list</ToolTipText>
+				</Strings>
+			</Button>
+		</Buttons>
+
+	</Commands>
+
+	<Symbols>
+		<GuidSymbol name="NuGetManagerSlim" value="{f6649f79-8c76-4df8-ae04-370c692ed6ed}">
+			<IDSymbol name="NuGetQuickManagerGroup"               value="0x1020" />
+			<IDSymbol name="OpenNuGetQuickManagerCommand"         value="0x0101" />
+
+			<IDSymbol name="NuGetQuickManagerToolbar"             value="0x1100" />
+			<IDSymbol name="NuGetQuickManagerToolbarGroup"        value="0x1101" />
+			<IDSymbol name="NuGetQuickManagerToolbarRefreshGroup" value="0x1102" />
+
+			<IDSymbol name="FilterInstalledCommand"               value="0x0200" />
+			<IDSymbol name="FilterUpdatesCommand"                 value="0x0201" />
+			<IDSymbol name="FilterPrereleaseCommand"              value="0x0202" />
+			<IDSymbol name="RefreshCommand"                       value="0x0203" />
+		</GuidSymbol>
+	</Symbols>
+
+</CommandTable>

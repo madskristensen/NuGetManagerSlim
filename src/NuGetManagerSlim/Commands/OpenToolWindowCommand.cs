@@ -5,7 +5,7 @@ using NuGetManagerSlim.ToolWindows;
 
 namespace NuGetManagerSlim.Commands
 {
-    [Command(PackageGuids.CommandSetGuidString, PackageIds.OpenNuGetQuickManagerCommand)]
+    [Command(PackageIds.OpenNuGetQuickManagerCommand)]
     internal sealed class OpenToolWindowCommand : BaseCommand<OpenToolWindowCommand>
     {
         protected override async Task ExecuteAsync(OleMenuCmdEventArgs e)

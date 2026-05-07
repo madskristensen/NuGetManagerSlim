@@ -4,6 +4,7 @@ using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Community.VisualStudio.Toolkit;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using NuGetManagerSlim.Models;
@@ -22,6 +23,7 @@ namespace NuGetManagerSlim.ViewModels
         private System.Timers.Timer? _debounceTimer;
         private readonly List<string> _searchHistory = [];
         private int _searchHistoryIndex = -1;
+        private readonly SynchronizationContext? _uiContext = SynchronizationContext.Current;
 
         [ObservableProperty] private string _searchText = string.Empty;
         [ObservableProperty] private ProjectScopeModel? _selectedScope;
@@ -114,7 +116,20 @@ namespace NuGetManagerSlim.ViewModels
 
         private void OnDebounceElapsed(object? sender, System.Timers.ElapsedEventArgs e)
         {
-            _ = SearchRemoteAsync();
+            if (_uiContext != null)
+            {
+                // Marshal to the WPF UI thread captured at construction so that
+                // collection updates inside SearchRemoteAsync run on the UI thread.
+                // We intentionally use SynchronizationContext rather than JoinableTaskFactory
+                // because this VM is unit-tested without the VS shell.
+#pragma warning disable VSTHRD001
+                _uiContext.Post(_ => _ = SearchRemoteAsync(), null);
+#pragma warning restore VSTHRD001
+            }
+            else
+            {
+                _ = SearchRemoteAsync();
+            }
         }
 
         private async Task SearchRemoteAsync()
@@ -156,6 +171,7 @@ namespace NuGetManagerSlim.ViewModels
             catch (Exception ex)
             {
                 StatusMessage = $"✗ Search failed: {ex.Message}";
+                await ex.LogAsync();
             }
             finally
             {
@@ -187,6 +203,7 @@ namespace NuGetManagerSlim.ViewModels
             catch (Exception ex)
             {
                 StatusMessage = $"✗ Failed to load packages: {ex.Message}";
+                await ex.LogAsync();
             }
             finally
             {
@@ -227,6 +244,7 @@ namespace NuGetManagerSlim.ViewModels
             catch (Exception ex)
             {
                 StatusMessage = $"✗ Failed to load package details: {ex.Message}";
+                await ex.LogAsync();
             }
         }
 
@@ -274,6 +292,7 @@ namespace NuGetManagerSlim.ViewModels
             catch (Exception ex)
             {
                 StatusMessage = $"✗ Failed to update {row.PackageId}: {ex.Message}";
+                await ex.LogAsync();
             }
             finally
             {
