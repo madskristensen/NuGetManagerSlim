@@ -38,23 +38,35 @@ namespace NuGetManagerSlim.Services
                 try
                 {
                     var repository = Repository.Factory.GetCoreV3(source.Source);
-                    var resource = await repository.GetResourceAsync<PackageSearchResource>(cancellationToken);
+                    var resource = await repository.GetResourceAsync<PackageSearchResource>(cancellationToken).ConfigureAwait(false);
                     if (resource == null) continue;
 
                     var searchFilter = new SearchFilter(includePrerelease: includePrerelease);
-                    var searchResults = await resource.SearchAsync(
-                        query, searchFilter, skip, take, _logger, cancellationToken);
+                    var searchResults = (await resource.SearchAsync(
+                        query, searchFilter, skip, take, _logger, cancellationToken).ConfigureAwait(false))
+                        .ToList();
 
-                    foreach (var result in searchResults)
+                    // Fan out version lookups in parallel instead of awaiting each
+                    // package sequentially (was an N+1 latency multiplier).
+                    var versionTasks = searchResults
+                        .Select(r => r.GetVersionsAsync())
+                        .ToArray();
+                    var versionsPerResult = await Task.WhenAll(versionTasks).ConfigureAwait(false);
+
+                    for (var i = 0; i < searchResults.Count; i++)
                     {
-                        var versions = (await result.GetVersionsAsync()).ToList();
-                        var latestStable = versions
-                            .Where(v => !v.Version.IsPrerelease)
-                            .OrderByDescending(v => v.Version)
-                            .FirstOrDefault()?.Version;
-                        var latestPre = versions
-                            .OrderByDescending(v => v.Version)
-                            .FirstOrDefault()?.Version;
+                        var result = searchResults[i];
+                        var versions = versionsPerResult[i];
+
+                        NuGet.Versioning.NuGetVersion? latestStable = null;
+                        NuGet.Versioning.NuGetVersion? latestPre = null;
+                        foreach (var v in versions)
+                        {
+                            if (latestPre == null || v.Version > latestPre)
+                                latestPre = v.Version;
+                            if (!v.Version.IsPrerelease && (latestStable == null || v.Version > latestStable))
+                                latestStable = v.Version;
+                        }
 
                         results.Add(new PackageModel
                         {
@@ -94,12 +106,12 @@ namespace NuGetManagerSlim.Services
                 try
                 {
                     var repository = Repository.Factory.GetCoreV3(source.Source);
-                    var resource = await repository.GetResourceAsync<PackageMetadataResource>(cancellationToken);
+                    var resource = await repository.GetResourceAsync<PackageMetadataResource>(cancellationToken).ConfigureAwait(false);
                     if (resource == null) continue;
 
                     var metadata = await resource.GetMetadataAsync(
                         packageId, includePrerelease: true, includeUnlisted: false,
-                        _cacheContext, _logger, cancellationToken);
+                        _cacheContext, _logger, cancellationToken).ConfigureAwait(false);
 
                     var latest = metadata.OrderByDescending(m => m.Identity.Version).FirstOrDefault();
                     if (latest == null) continue;
@@ -153,10 +165,10 @@ namespace NuGetManagerSlim.Services
                 try
                 {
                     var repository = Repository.Factory.GetCoreV3(source.Source);
-                    var resource = await repository.GetResourceAsync<PackageMetadataResource>(cancellationToken);
+                    var resource = await repository.GetResourceAsync<PackageMetadataResource>(cancellationToken).ConfigureAwait(false);
                     if (resource == null) continue;
 
-                    var meta = await resource.GetMetadataAsync(identity, _cacheContext, _logger, cancellationToken);
+                    var meta = await resource.GetMetadataAsync(identity, _cacheContext, _logger, cancellationToken).ConfigureAwait(false);
                     if (meta == null) continue;
 
                     var deps = meta.DependencySets
@@ -204,10 +216,10 @@ namespace NuGetManagerSlim.Services
                 try
                 {
                     var repository = Repository.Factory.GetCoreV3(source.Source);
-                    var resource = await repository.GetResourceAsync<FindPackageByIdResource>(cancellationToken);
+                    var resource = await repository.GetResourceAsync<FindPackageByIdResource>(cancellationToken).ConfigureAwait(false);
                     if (resource == null) continue;
 
-                    var versions = await resource.GetAllVersionsAsync(packageId, _cacheContext, _logger, cancellationToken);
+                    var versions = await resource.GetAllVersionsAsync(packageId, _cacheContext, _logger, cancellationToken).ConfigureAwait(false);
                     return versions
                         .Where(v => includePrerelease || !v.IsPrerelease)
                         .OrderByDescending(v => v)

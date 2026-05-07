@@ -98,7 +98,11 @@ namespace NuGetManagerSlim.ViewModels
         public bool CanQuickInstall => !IsInstalled
             && (_model.LatestStableVersion != null || _model.LatestPrereleaseVersion != null);
 
+        public bool CanQuickUninstall => IsInstalled && !IsTransitive;
+
         public string InstallButtonAccessibleName => $"Install {PackageId}";
+
+        public string UninstallButtonAccessibleName => $"Uninstall {PackageId}";
 
         public PackageModel Model => _model;
     }

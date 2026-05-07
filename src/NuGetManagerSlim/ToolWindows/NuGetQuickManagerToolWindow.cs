@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.ComponentModel.Design;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -18,6 +19,10 @@ namespace NuGetManagerSlim.ToolWindows
 {
     public class NuGetQuickManagerToolWindow : BaseToolWindow<NuGetQuickManagerToolWindow>
     {
+        // CreateAsync runs before the Pane constructor, so we stage the session
+        // here and let the Pane pick it up when it's instantiated.
+        private static (MainViewModel ViewModel, NuGetFeedService FeedService, RestoreMonitorService RestoreMonitor)? _pendingSession;
+
         public override string GetTitle(int toolWindowId) => "NuGet Quick Manager";
 
         public override Type PaneType => typeof(Pane);
@@ -31,59 +36,15 @@ namespace NuGetManagerSlim.ToolWindows
             var viewModel = new MainViewModel(projectService, feedService, restoreMonitor);
             await viewModel.InitializeAsync(cancellationToken);
 
-            Pane.CurrentViewModel = viewModel;
-
-            viewModel.PropertyChanged += (s, e) =>
+            var session = (viewModel, feedService, restoreMonitor);
+            if (Pane.Instance != null)
             {
-                if (e.PropertyName == nameof(MainViewModel.CurrentProject))
-                {
-                    var project = viewModel.CurrentProject;
-                    if (Pane.Instance != null)
-                    {
-                        Pane.Instance.Caption = project == null
-                            ? "NuGet Quick Manager"
-                            : $"NuGet Quick Manager - {project.DisplayName}";
-                    }
-                }
-            };
-
-            VS.Events.SolutionEvents.OnAfterCloseSolution += () =>
+                Pane.Instance.AttachSession(viewModel, feedService, restoreMonitor);
+            }
+            else
             {
-                try
-                {
-                    viewModel.ClearCurrentProject();
-                }
-                catch (Exception ex)
-                {
-                    _ = ex.LogAsync();
-                }
-            };
-
-            VS.Events.SelectionEvents.SelectionChanged += (s, e) =>
-            {
-                _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
-                {
-                    try
-                    {
-                        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-                        var project = await VS.Solutions.GetActiveProjectAsync();
-                        if (project == null || string.IsNullOrEmpty(project.FullPath)) return;
-                        if (!IsManagedDotNetProject(project.FullPath)) return;
-                        if (string.Equals(viewModel.CurrentProject?.ProjectFullPath, project.FullPath, StringComparison.OrdinalIgnoreCase))
-                            return;
-
-                        var displayName = project.Name;
-                        if (string.IsNullOrEmpty(displayName) || displayName!.IndexOfAny(new[] { '\\', '/' }) >= 0)
-                            displayName = System.IO.Path.GetFileNameWithoutExtension(project.FullPath);
-
-                        await viewModel.SetCurrentProjectAsync(project.FullPath!, displayName);
-                    }
-                    catch (Exception ex)
-                    {
-                        await ex.LogAsync();
-                    }
-                });
-            };
+                _pendingSession = session;
+            }
 
             return new NuGetQuickManagerControl(viewModel);
         }
@@ -103,6 +64,13 @@ namespace NuGetManagerSlim.ToolWindows
             internal static MainViewModel? CurrentViewModel { get; set; }
             internal static Pane? Instance { get; private set; }
 
+            private MainViewModel? _viewModel;
+            private NuGetFeedService? _feedService;
+            private RestoreMonitorService? _restoreMonitor;
+            private PropertyChangedEventHandler? _viewModelPropertyChanged;
+            private Action? _solutionClosedHandler;
+            private EventHandler<SelectionChangedEventArgs>? _selectionChangedHandler;
+
             public Pane()
             {
                 Instance = this;
@@ -112,6 +80,115 @@ namespace NuGetManagerSlim.ToolWindows
                     PackageGuids.NuGetManagerSlim,
                     PackageIds.NuGetQuickManagerToolbar);
                 ToolBarLocation = (int)VSTWT_LOCATION.VSTWT_TOP;
+
+                // CreateAsync may have completed before this constructor ran;
+                // pick up the staged session if so.
+                var pending = _pendingSession;
+                if (pending.HasValue)
+                {
+                    _pendingSession = null;
+                    AttachSession(pending.Value.ViewModel, pending.Value.FeedService, pending.Value.RestoreMonitor);
+                }
+            }
+
+            internal void AttachSession(MainViewModel viewModel, NuGetFeedService feedService, RestoreMonitorService restoreMonitor)
+            {
+                _viewModel = viewModel;
+                _feedService = feedService;
+                _restoreMonitor = restoreMonitor;
+                CurrentViewModel = viewModel;
+
+                _viewModelPropertyChanged = (s, e) =>
+                {
+                    if (e.PropertyName == nameof(MainViewModel.CurrentProject))
+                    {
+                        var project = viewModel.CurrentProject;
+                        Caption = project == null
+                            ? "NuGet Quick Manager"
+                            : $"NuGet Quick Manager - {project.DisplayName}";
+                    }
+                };
+                viewModel.PropertyChanged += _viewModelPropertyChanged;
+
+                _solutionClosedHandler = () =>
+                {
+                    try
+                    {
+                        viewModel.ClearCurrentProject();
+                    }
+                    catch (Exception ex)
+                    {
+                        _ = ex.LogAsync();
+                    }
+                };
+                VS.Events.SolutionEvents.OnAfterCloseSolution += _solutionClosedHandler;
+
+                _selectionChangedHandler = (s, e) =>
+                {
+                    _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+                    {
+                        try
+                        {
+                            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                            var project = await VS.Solutions.GetActiveProjectAsync();
+                            if (project == null || string.IsNullOrEmpty(project.FullPath)) return;
+                            if (!IsManagedDotNetProject(project.FullPath)) return;
+                            if (string.Equals(viewModel.CurrentProject?.ProjectFullPath, project.FullPath, StringComparison.OrdinalIgnoreCase))
+                                return;
+
+                            var displayName = project.Name;
+                            if (string.IsNullOrEmpty(displayName) || displayName!.IndexOfAny(new[] { '\\', '/' }) >= 0)
+                                displayName = System.IO.Path.GetFileNameWithoutExtension(project.FullPath);
+
+                            await viewModel.SetCurrentProjectAsync(project.FullPath!, displayName);
+                        }
+                        catch (Exception ex)
+                        {
+                            await ex.LogAsync();
+                        }
+                    });
+                };
+                VS.Events.SelectionEvents.SelectionChanged += _selectionChangedHandler;
+            }
+
+            protected override void Dispose(bool disposing)
+            {
+                if (disposing)
+                {
+                    try
+                    {
+                        if (_viewModelPropertyChanged != null && _viewModel != null)
+                            _viewModel.PropertyChanged -= _viewModelPropertyChanged;
+                        if (_solutionClosedHandler != null)
+                            VS.Events.SolutionEvents.OnAfterCloseSolution -= _solutionClosedHandler;
+                        if (_selectionChangedHandler != null)
+                            VS.Events.SelectionEvents.SelectionChanged -= _selectionChangedHandler;
+
+                        _viewModel?.Dispose();
+                        _feedService?.Dispose();
+                        _restoreMonitor?.Dispose();
+                    }
+                    catch (Exception ex)
+                    {
+                        _ = ex.LogAsync();
+                    }
+                    finally
+                    {
+                        if (ReferenceEquals(CurrentViewModel, _viewModel))
+                            CurrentViewModel = null;
+                        if (ReferenceEquals(Instance, this))
+                            Instance = null;
+
+                        _viewModelPropertyChanged = null;
+                        _solutionClosedHandler = null;
+                        _selectionChangedHandler = null;
+                        _viewModel = null;
+                        _feedService = null;
+                        _restoreMonitor = null;
+                    }
+                }
+
+                base.Dispose(disposing);
             }
 
             public override bool SearchEnabled => true;
@@ -194,14 +271,15 @@ namespace NuGetManagerSlim.ToolWindows
                 {
                     try
                     {
+                        ThreadHelper.ThrowIfNotOnUIThread();
                         var vm = CurrentViewModel;
                         if (vm != null)
                         {
-                            ThreadHelper.JoinableTaskFactory.Run(async () =>
-                            {
-                                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-                                vm.SearchText = SearchQuery.SearchString ?? string.Empty;
-                            });
+                            // CreateSearch is invoked on the UI thread by the VS search
+                            // infrastructure, so update the ViewModel directly without
+                            // marshaling. The previous JoinableTaskFactory.Run wrapper
+                            // synchronously blocked the UI thread for no benefit.
+                            vm.SearchText = SearchQuery.SearchString ?? string.Empty;
                             SearchResults = (uint)vm.Packages.Count;
                         }
                         else

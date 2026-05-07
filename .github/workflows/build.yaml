@@ -56,7 +56,7 @@ jobs:
       uses: actions/upload-artifact@v7
       with:
         name: ${{ github.event.repository.name }}.vsix
-        path: src\NuGetManagerSlim\bin\${{ env.Configuration }}\**\*.vsix
+        path: src\NuGetManagerSlim\bin\${{ env.Configuration }}\net48\NuGetManagerSlim.vsix
 
   publish:
     if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}

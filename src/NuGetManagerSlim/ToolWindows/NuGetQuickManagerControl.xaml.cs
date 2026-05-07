@@ -26,6 +26,20 @@ namespace NuGetManagerSlim.ToolWindows
             if (sender is Image image)
             {
                 image.Visibility = Visibility.Collapsed;
+
+                // Restore the placeholder CrispImage in the same Grid; the
+                // DataTrigger collapsed it because HasIcon is true based on
+                // IconUrl alone, which can't tell us the bitmap failed to load.
+                if (image.Parent is Panel parent)
+                {
+                    foreach (var child in parent.Children)
+                    {
+                        if (child is Microsoft.VisualStudio.Imaging.CrispImage placeholder)
+                        {
+                            placeholder.Visibility = Visibility.Visible;
+                        }
+                    }
+                }
             }
         }
     }

@@ -137,7 +137,16 @@ namespace NuGetManagerSlim.Services
             var installer = await GetServiceAsync<IVsPackageInstaller>();
             if (installer == null) throw new InvalidOperationException("IVsPackageInstaller is not available.");
 
-            await Task.Run(() => installer.InstallPackage((string?)null, project, packageId, version.ToNormalizedString(), false), cancellationToken);
+            // IVsPackageInstaller.InstallPackage is documented as thread-safe
+            // and synchronously blocks for the duration of the install
+            // (network + restore). Run it on the thread pool so the UI stays
+            // responsive; COM marshaling for the DTE Project handle is
+            // handled internally by the wrapper.
+            await Task.Run(
+                () => installer.InstallPackage((string?)null, project, packageId, version.ToNormalizedString(), false),
+                cancellationToken);
+
+            await SaveProjectAsync(project);
         }
 
         public Task UpdatePackageAsync(string projectPath, string packageId, NuGetVersion version, CancellationToken cancellationToken)
@@ -154,7 +163,28 @@ namespace NuGetManagerSlim.Services
             var uninstaller = await GetServiceAsync<IVsPackageUninstaller>();
             if (uninstaller == null) throw new InvalidOperationException("IVsPackageUninstaller is not available.");
 
-            await Task.Run(() => uninstaller.UninstallPackage(project, packageId, removeDependencies: false), cancellationToken);
+            await Task.Run(
+                () => uninstaller.UninstallPackage(project, packageId, removeDependencies: false),
+                cancellationToken);
+
+            await SaveProjectAsync(project);
+        }
+
+        // SDK-style projects modified by IVsPackageInstaller / IVsPackageUninstaller
+        // are dirtied in memory but not flushed to disk, so a subsequent restore-monitor
+        // refresh sees stale package references. Force-save the project (and the solution)
+        // so the new PackageReference list is on disk before we reload.
+        private static async Task SaveProjectAsync(EnvDTE.Project project)
+        {
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+            try
+            {
+                project.Save();
+            }
+            catch (Exception ex)
+            {
+                await ex.LogAsync();
+            }
         }
 
         private static async Task<T?> GetServiceAsync<T>() where T : class

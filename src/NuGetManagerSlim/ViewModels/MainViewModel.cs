@@ -25,6 +25,17 @@ namespace NuGetManagerSlim.ViewModels
         private readonly INuGetFeedService _feedService;
         private readonly IRestoreMonitorService _restoreMonitor;
 
+        private const int MaxSearchHistory = 20;
+        private const int MaxOperationLog = 500;
+
+        private static readonly System.Text.RegularExpressions.Regex SourceFilterRegex = new(
+            "source:(?:\"(?<v>[^\"]*)\"|(?<v>\\S+))",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
+
+        private static readonly System.Text.RegularExpressions.Regex WhitespaceRegex = new(
+            "\\s+",
+            System.Text.RegularExpressions.RegexOptions.Compiled);
+
         private CancellationTokenSource? _searchCts;
         private CancellationTokenSource? _operationCts;
         private System.Timers.Timer? _debounceTimer;
@@ -196,9 +207,15 @@ namespace NuGetManagerSlim.ViewModels
                 if (!FilterInstalled && !FilterUpdates)
                 {
                     IsRemoteLoading = true;
-                    var results = await _feedService.SearchAsync(cleanQuery ?? string.Empty, FilterPrerelease, 0, 50, ct, sourceFilter);
+                    var searchTask = _feedService.SearchAsync(cleanQuery ?? string.Empty, FilterPrerelease, 0, 50, ct, sourceFilter);
+                    var installedTask = CurrentProject != null
+                        ? _projectService.GetInstalledPackagesAsync(CurrentProject, ct)
+                        : Task.FromResult<IReadOnlyList<PackageModel>>(Array.Empty<PackageModel>());
+                    await Task.WhenAll(searchTask, installedTask);
                     ct.ThrowIfCancellationRequested();
-                    ApplyRemoteResults(results);
+                    var results = await searchTask;
+                    var installed = await installedTask;
+                    ApplyRemoteResults(results, BuildInstalledMap(installed));
                 }
                 else
                 {
@@ -211,7 +228,7 @@ namespace NuGetManagerSlim.ViewModels
             }
             catch (Exception ex)
             {
-                StatusMessage = $"✗ Search failed: {ex.Message}";
+                SetStatus($"✗ Search failed: {ex.Message}");
                 await ex.LogAsync();
             }
             finally
@@ -229,11 +246,7 @@ namespace NuGetManagerSlim.ViewModels
                 return (query ?? string.Empty, null);
 
             var sources = new List<string>();
-            var pattern = new System.Text.RegularExpressions.Regex(
-                "source:(?:\"(?<v>[^\"]*)\"|(?<v>\\S+))",
-                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-
-            var stripped = pattern.Replace(query, m =>
+            var stripped = SourceFilterRegex.Replace(query, m =>
             {
                 var value = m.Groups["v"].Value;
                 if (!string.IsNullOrWhiteSpace(value))
@@ -241,7 +254,7 @@ namespace NuGetManagerSlim.ViewModels
                 return string.Empty;
             });
 
-            stripped = System.Text.RegularExpressions.Regex.Replace(stripped, "\\s+", " ").Trim();
+            stripped = WhitespaceRegex.Replace(stripped, " ").Trim();
             return (stripped, sources.Count == 0 ? null : sources);
         }
 
@@ -274,7 +287,7 @@ namespace NuGetManagerSlim.ViewModels
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
             {
-                StatusMessage = $"✗ Failed to load packages: {ex.Message}";
+                SetStatus($"✗ Failed to load packages: {ex.Message}");
                 await ex.LogAsync();
             }
             finally
@@ -326,11 +339,52 @@ namespace NuGetManagerSlim.ViewModels
             }, ct);
         }
 
-        private void ApplyRemoteResults(IReadOnlyList<PackageModel> results)
+        private static Dictionary<string, PackageModel> BuildInstalledMap(IReadOnlyList<PackageModel> installed)
+        {
+            var map = new Dictionary<string, PackageModel>(StringComparer.OrdinalIgnoreCase);
+            foreach (var p in installed)
+            {
+                if (p.IsTransitive) continue;
+                if (p.InstalledVersion == null) continue;
+                map[p.PackageId] = p;
+            }
+            return map;
+        }
+
+        private void ApplyRemoteResults(IReadOnlyList<PackageModel> results, Dictionary<string, PackageModel>? installedById = null)
         {
             Packages.Clear();
             foreach (var m in results)
-                Packages.Add(new PackageRowViewModel(m));
+            {
+                var model = m;
+                // Annotate remote search hits that the user already has installed
+                // so the row shows the green check + the uninstall button without
+                // forcing the user to switch to the Installed view.
+                if (installedById != null && installedById.TryGetValue(m.PackageId, out var inst))
+                {
+                    model = new PackageModel
+                    {
+                        PackageId = m.PackageId,
+                        InstalledVersion = inst.InstalledVersion,
+                        LatestStableVersion = m.LatestStableVersion,
+                        LatestPrereleaseVersion = m.LatestPrereleaseVersion,
+                        Description = m.Description,
+                        Authors = m.Authors,
+                        LicenseExpression = m.LicenseExpression,
+                        LicenseUrl = m.LicenseUrl,
+                        DownloadCount = m.DownloadCount,
+                        SourceName = m.SourceName,
+                        IsTransitive = false,
+                        RequiredByPackageId = m.RequiredByPackageId,
+                        ReadmeUrl = m.ReadmeUrl,
+                        ProjectUrl = m.ProjectUrl,
+                        IconUrl = m.IconUrl,
+                        PerFrameworkVersions = m.PerFrameworkVersions,
+                        Dependencies = m.Dependencies,
+                    };
+                }
+                Packages.Add(new PackageRowViewModel(model));
+            }
 
             OnPropertyChanged(nameof(HasPackages));
             OnPropertyChanged(nameof(IsEmptyState));
@@ -344,8 +398,8 @@ namespace NuGetManagerSlim.ViewModels
 
             var detail = new PackageDetailViewModel(_feedService, _projectService, msg =>
             {
-                StatusMessage = msg;
-                OperationLog.Add($"[{DateTime.Now:HH:mm:ss}] {msg}");
+                SetStatus(msg);
+                AppendOperationLog($"[{DateTime.Now:HH:mm:ss}] {msg}");
             }, async () => await ReloadPackagesAsync());
 
             try
@@ -357,7 +411,7 @@ namespace NuGetManagerSlim.ViewModels
             catch (OperationCanceledException) { }
             catch (Exception ex)
             {
-                StatusMessage = $"✗ Failed to load package details: {ex.Message}";
+                SetStatus($"✗ Failed to load package details: {ex.Message}");
                 await ex.LogAsync();
             }
         }
@@ -405,15 +459,17 @@ namespace NuGetManagerSlim.ViewModels
             row.IsOperationInProgress = true;
             try
             {
-                StatusMessage = $"Updating {row.PackageId}…";
+                SetStatus($"Updating {row.PackageId}…");
                 if (CurrentProject?.ProjectFullPath != null && row.LatestStableVersion != null)
                     await _projectService.UpdatePackageAsync(CurrentProject.ProjectFullPath, row.PackageId, row.LatestStableVersion, CancellationToken.None);
-                StatusMessage = $"✓ Updated {row.PackageId} → {row.LatestStableVersion}";
-                OperationLog.Add($"[{DateTime.Now:HH:mm:ss}] ✓ Updated {row.PackageId} → {row.LatestStableVersion}");
+                var done = $"✓ Updated {row.PackageId} → {row.LatestStableVersion}";
+                SetStatus(done);
+                AppendOperationLog($"[{DateTime.Now:HH:mm:ss}] {done}");
+                await ReloadPackagesAsync();
             }
             catch (Exception ex)
             {
-                StatusMessage = $"✗ Failed to update {row.PackageId}: {ex.Message}";
+                SetStatus($"✗ Failed to update {row.PackageId}: {ex.Message}");
                 await ex.LogAsync();
             }
             finally
@@ -432,17 +488,47 @@ namespace NuGetManagerSlim.ViewModels
             row.IsOperationInProgress = true;
             try
             {
-                StatusMessage = $"Installing {row.PackageId}…";
+                SetStatus($"Installing {row.PackageId}…");
                 if (CurrentProject?.ProjectFullPath != null)
                 {
                     await _projectService.InstallPackageAsync(CurrentProject.ProjectFullPath, row.PackageId, version, CancellationToken.None);
                 }
-                StatusMessage = $"✓ Installed {row.PackageId} {version}";
-                OperationLog.Add($"[{DateTime.Now:HH:mm:ss}] ✓ Installed {row.PackageId} {version}");
+                var done = $"✓ Installed {row.PackageId} {version}";
+                SetStatus(done);
+                AppendOperationLog($"[{DateTime.Now:HH:mm:ss}] {done}");
+                await ReloadPackagesAsync();
             }
             catch (Exception ex)
             {
-                StatusMessage = $"✗ Failed to install {row.PackageId}: {ex.Message}";
+                SetStatus($"✗ Failed to install {row.PackageId}: {ex.Message}");
+                await ex.LogAsync();
+            }
+            finally
+            {
+                row.IsOperationInProgress = false;
+            }
+        }
+
+        [RelayCommand]
+        private async Task QuickUninstallAsync(PackageRowViewModel? row)
+        {
+            if (row == null) return;
+            row.IsOperationInProgress = true;
+            try
+            {
+                SetStatus($"Uninstalling {row.PackageId}…");
+                if (CurrentProject?.ProjectFullPath != null)
+                {
+                    await _projectService.UninstallPackageAsync(CurrentProject.ProjectFullPath, row.PackageId, CancellationToken.None);
+                }
+                var done = $"✓ Uninstalled {row.PackageId}";
+                SetStatus(done);
+                AppendOperationLog($"[{DateTime.Now:HH:mm:ss}] {done}");
+                await ReloadPackagesAsync();
+            }
+            catch (Exception ex)
+            {
+                SetStatus($"✗ Failed to uninstall {row.PackageId}: {ex.Message}");
                 await ex.LogAsync();
             }
             finally
@@ -463,9 +549,39 @@ namespace NuGetManagerSlim.ViewModels
         {
             if (_searchHistory.LastOrDefault() == query) return;
             _searchHistory.Add(query);
-            if (_searchHistory.Count > 20)
+            if (_searchHistory.Count > MaxSearchHistory)
                 _searchHistory.RemoveAt(0);
             _searchHistoryIndex = _searchHistory.Count;
+        }
+
+        private void AppendOperationLog(string message)
+        {
+            OperationLog.Add(message);
+            // Cap the log so long-running sessions don't accumulate unbounded
+            // strings and slow down the bound ItemsControl.
+            while (OperationLog.Count > MaxOperationLog)
+                OperationLog.RemoveAt(0);
+        }
+
+        // Updates the in-window StatusMessage and mirrors the message to the
+        // Visual Studio main status bar so users can see progress and errors
+        // without having to keep the tool window visible.
+        private void SetStatus(string message)
+        {
+            StatusMessage = message;
+            _ = WriteVsStatusAsync(message);
+        }
+
+        private static async Task WriteVsStatusAsync(string message)
+        {
+            try
+            {
+                await VS.StatusBar.ShowMessageAsync(message);
+            }
+            catch (Exception ex)
+            {
+                await ex.LogAsync();
+            }
         }
 
         private void UpdateEmptyState()
@@ -496,7 +612,7 @@ namespace NuGetManagerSlim.ViewModels
         private void OnRestoreStatusChanged(object? sender, RestoreStatusChangedEventArgs e)
         {
             if (e.IsRestoreIncomplete)
-                StatusMessage = $"⚠ Restore incomplete for {e.ProjectName} — {e.UnresolvedCount} packages unresolved.";
+                SetStatus($"⚠ Restore incomplete for {e.ProjectName} — {e.UnresolvedCount} packages unresolved.");
         }
 
         public void Dispose()

@@ -258,13 +258,26 @@
                                 <RowDefinition />
                             </Grid.RowDefinitions>
 
-                            <!-- Package icon (with NuGetNoColor fallback when missing or fails to load). No border / chrome. -->
+                            <!-- Package icon (with NuGetNoColor fallback when missing or fails to load). No border / chrome.
+                                 The fallback CrispImage is hidden whenever the package icon Image is shown so the
+                                 placeholder doesn't bleed through transparent PNGs. -->
                             <Grid Grid.Column="0" Grid.RowSpan="2"
                                   Width="32" Height="32"
                                   VerticalAlignment="Center">
                                 <imaging:CrispImage Width="20" Height="20"
                                                     Moniker="{x:Static catalog:KnownMonikers.NuGetNoColor}"
-                                                    HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                    HorizontalAlignment="Center" VerticalAlignment="Center">
+                                    <imaging:CrispImage.Style>
+                                        <Style TargetType="imaging:CrispImage">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding HasIcon}" Value="True">
+                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </imaging:CrispImage.Style>
+                                </imaging:CrispImage>
                                 <Image Source="{Binding IconUrl, IsAsync=True, TargetNullValue={x:Null}, FallbackValue={x:Null}}"
                                        Width="28" Height="28"
                                        Stretch="Uniform"
@@ -338,6 +351,15 @@
                                         AutomationProperties.Name="{Binding UpdateButtonAccessibleName}">
                                     <imaging:CrispImage Width="16" Height="16"
                                                         Moniker="{x:Static catalog:KnownMonikers.StatusUpdateAvailable}" />
+                                </Button>
+                                <Button Style="{StaticResource IconButtonStyle}"
+                                        Command="{Binding DataContext.QuickUninstallCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                        CommandParameter="{Binding}"
+                                        ToolTip="Uninstall package"
+                                        Visibility="{Binding CanQuickUninstall, Converter={StaticResource BoolToVis}}"
+                                        AutomationProperties.Name="{Binding UninstallButtonAccessibleName}">
+                                    <imaging:CrispImage Width="16" Height="16"
+                                                        Moniker="{x:Static catalog:KnownMonikers.Remove}" />
                                 </Button>
                             </StackPanel>
                         </Grid>
@@ -497,16 +519,8 @@
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <TextBlock Grid.Column="0"
-                           Text="{Binding StatusMessage}"
-                           TextTrimming="CharacterEllipsis"
-                           VerticalAlignment="Center"
-                           FontSize="11"
-                           Foreground="{DynamicResource {x:Static vsui:EnvironmentColors.StatusBarDefaultTextBrushKey}}"
-                           AutomationProperties.LiveSetting="Polite" />
-                <CheckBox Grid.Column="1"
+                <CheckBox Grid.Column="0"
                           IsChecked="{Binding FilterPrerelease}"
                           Content="Include prerelease"
                           VerticalAlignment="Center"
@@ -514,12 +528,12 @@
                           FontSize="11"
                           Foreground="{DynamicResource {x:Static vsui:EnvironmentColors.StatusBarDefaultTextBrushKey}}"
                           AutomationProperties.Name="Include prerelease versions" />
-                <Button Grid.Column="2" Content="View log"
+                <Button Grid.Column="1" Content="View log"
                         Command="{Binding ToggleLogCommand}"
                         Padding="8,2"
                         Margin="4,0"
                         AutomationProperties.Name="View operation log" />
-                <Button Grid.Column="3" Content="&#x21BB; Refresh"
+                <Button Grid.Column="2" Content="&#x21BB; Refresh"
                         Command="{Binding RefreshCommand}"
                         Padding="8,2"
                         AutomationProperties.Name="Refresh package list" />
