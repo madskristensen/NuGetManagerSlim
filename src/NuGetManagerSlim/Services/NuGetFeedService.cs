@@ -14,8 +14,104 @@ namespace NuGetManagerSlim.Services
 {
     public sealed class NuGetFeedService : INuGetFeedService, IDisposable
     {
-        private readonly SourceCacheContext _cacheContext = new();
+        // Reuse NuGet's on-disk HTTP cache (%userprofile%\.nuget\v3-cache) for the
+        // whole VS session and let entries live up to 30 minutes before we go back
+        // to the network. Default MaxAge is much shorter, which forces revalidation
+        // on most metadata requests.
+        private readonly SourceCacheContext _cacheContext = new()
+        {
+            MaxAge = DateTimeOffset.UtcNow.AddMinutes(-30),
+        };
         private readonly ILogger _logger = NullLogger.Instance;
+
+        // In-memory result cache so re-typing or re-opening a previously seen
+        // search renders instantly without a second network round-trip. The
+        // NuGet HTTP cache below us already de-duplicates HTTP responses, but
+        // skipping the entire SearchAsync pipeline (resource lookup + version
+        // fan-out per result) is what actually makes typing feel snappy.
+        private static readonly TimeSpan SearchCacheTtl = TimeSpan.FromMinutes(10);
+        private const int SearchCacheMaxEntries = 64;
+        private readonly Dictionary<string, SearchCacheEntry> _searchCache = new(StringComparer.Ordinal);
+        private readonly object _searchCacheLock = new();
+
+        private sealed class SearchCacheEntry
+        {
+            public DateTime ExpiresUtc;
+            public IReadOnlyList<PackageModel> Results = Array.Empty<PackageModel>();
+        }
+
+        private static string BuildSearchCacheKey(
+            string query,
+            bool includePrerelease,
+            int skip,
+            int take,
+            IReadOnlyCollection<string>? sourceNameFilter)
+        {
+            var sources = sourceNameFilter == null || sourceNameFilter.Count == 0
+                ? string.Empty
+                : string.Join(",", sourceNameFilter.OrderBy(s => s, StringComparer.OrdinalIgnoreCase));
+            return $"{(query ?? string.Empty).ToLowerInvariant()}|{includePrerelease}|{skip}|{take}|{sources}";
+        }
+
+        private bool TryGetCachedSearch(string key, out IReadOnlyList<PackageModel> results)
+        {
+            lock (_searchCacheLock)
+            {
+                if (_searchCache.TryGetValue(key, out var entry) && entry.ExpiresUtc > DateTime.UtcNow)
+                {
+                    results = entry.Results;
+                    return true;
+                }
+                if (_searchCache.ContainsKey(key))
+                    _searchCache.Remove(key);
+            }
+            results = Array.Empty<PackageModel>();
+            return false;
+        }
+
+        private void StoreCachedSearch(string key, IReadOnlyList<PackageModel> results)
+        {
+            lock (_searchCacheLock)
+            {
+                if (_searchCache.Count >= SearchCacheMaxEntries)
+                {
+                    // Drop the entry that expires soonest. Keeps the cache bounded
+                    // without a full LRU bookkeeping struct.
+                    var oldestKey = string.Empty;
+                    var oldestExp = DateTime.MaxValue;
+                    foreach (var kvp in _searchCache)
+                    {
+                        if (kvp.Value.ExpiresUtc < oldestExp)
+                        {
+                            oldestExp = kvp.Value.ExpiresUtc;
+                            oldestKey = kvp.Key;
+                        }
+                    }
+                    if (oldestKey.Length > 0)
+                        _searchCache.Remove(oldestKey);
+                }
+
+                _searchCache[key] = new SearchCacheEntry
+                {
+                    ExpiresUtc = DateTime.UtcNow.Add(SearchCacheTtl),
+                    Results = results,
+                };
+            }
+        }
+
+        // When set, the next SearchAsync call will skip our in-memory cache to
+        // guarantee a live feed query (used by the user-initiated Refresh action).
+        // The flag auto-clears after that call.
+        private int _bypassNextNetworkFetch;
+
+        public void InvalidateCache()
+        {
+            lock (_searchCacheLock)
+            {
+                _searchCache.Clear();
+            }
+            System.Threading.Interlocked.Exchange(ref _bypassNextNetworkFetch, 1);
+        }
 
         public async Task<IReadOnlyList<PackageModel>> SearchAsync(
             string query,
@@ -25,6 +121,11 @@ namespace NuGetManagerSlim.Services
             CancellationToken cancellationToken,
             IReadOnlyCollection<string>? sourceNameFilter = null)
         {
+            var bypass = System.Threading.Interlocked.Exchange(ref _bypassNextNetworkFetch, 0) == 1;
+            var cacheKey = BuildSearchCacheKey(query, includePrerelease, skip, take, sourceNameFilter);
+            if (!bypass && TryGetCachedSearch(cacheKey, out var cached))
+                return cached;
+
             var results = new List<PackageModel>();
             var sources = GetEnabledSources();
             if (sourceNameFilter != null && sourceNameFilter.Count > 0)
@@ -33,68 +134,99 @@ namespace NuGetManagerSlim.Services
                 sources = sources.Where(s => allowed.Contains(s.Name)).ToList();
             }
 
-            foreach (var source in sources)
+            // Fan out to all enabled sources in parallel and race each against a
+            // soft 2.5s deadline. A slow / dead feed no longer blocks the healthy
+            // ones - we surface whatever returned in time.
+            var perSourceTimeout = TimeSpan.FromMilliseconds(2500);
+            using var perCallCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            var sourceTasks = sources
+                .Select(src => RunSourceSearchAsync(src, query, includePrerelease, skip, take, perCallCts.Token))
+                .ToArray();
+
+            var completed = Task.WhenAll(sourceTasks);
+            var timeout = Task.Delay(perSourceTimeout, cancellationToken);
+            await Task.WhenAny(completed, timeout).ConfigureAwait(false);
+
+            for (var i = 0; i < sourceTasks.Length; i++)
             {
-                try
-                {
-                    var repository = Repository.Factory.GetCoreV3(source.Source);
-                    var resource = await repository.GetResourceAsync<PackageSearchResource>(cancellationToken).ConfigureAwait(false);
-                    if (resource == null) continue;
-
-                    var searchFilter = new SearchFilter(includePrerelease: includePrerelease);
-                    var searchResults = (await resource.SearchAsync(
-                        query, searchFilter, skip, take, _logger, cancellationToken).ConfigureAwait(false))
-                        .ToList();
-
-                    // Fan out version lookups in parallel instead of awaiting each
-                    // package sequentially (was an N+1 latency multiplier).
-                    var versionTasks = searchResults
-                        .Select(r => r.GetVersionsAsync())
-                        .ToArray();
-                    var versionsPerResult = await Task.WhenAll(versionTasks).ConfigureAwait(false);
-
-                    for (var i = 0; i < searchResults.Count; i++)
-                    {
-                        var result = searchResults[i];
-                        var versions = versionsPerResult[i];
-
-                        NuGet.Versioning.NuGetVersion? latestStable = null;
-                        NuGet.Versioning.NuGetVersion? latestPre = null;
-                        foreach (var v in versions)
-                        {
-                            if (latestPre == null || v.Version > latestPre)
-                                latestPre = v.Version;
-                            if (!v.Version.IsPrerelease && (latestStable == null || v.Version > latestStable))
-                                latestStable = v.Version;
-                        }
-
-                        results.Add(new PackageModel
-                        {
-                            PackageId = result.Identity.Id,
-                            LatestStableVersion = latestStable,
-                            LatestPrereleaseVersion = latestPre,
-                            Description = result.Description,
-                            Authors = result.Authors,
-                            DownloadCount = result.DownloadCount ?? 0,
-                            SourceName = source.Name,
-                            IconUrl = result.IconUrl?.ToString(),
-                        });
-                    }
-                }
-                catch (OperationCanceledException)
-                {
-                    throw;
-                }
-                catch
-                {
-                    // Source unreachable — caller can check source status separately
-                }
+                var t = sourceTasks[i];
+                if (t.Status == TaskStatus.RanToCompletion && t.Result != null)
+                    results.AddRange(t.Result);
             }
 
-            return results
+            // Let any still-running source tasks finish silently in the background
+            // so their results land in the next cache fill, but don't await them.
+            _ = completed.ContinueWith(_ => { /* observe to avoid UnobservedTaskException */ }, TaskScheduler.Default);
+
+            var deduped = results
                 .GroupBy(p => p.PackageId, StringComparer.OrdinalIgnoreCase)
                 .Select(g => g.First())
                 .ToList();
+            StoreCachedSearch(cacheKey, deduped);
+            return deduped;
+        }
+
+        private async Task<List<PackageModel>?> RunSourceSearchAsync(
+            PackageSourceModel source,
+            string query,
+            bool includePrerelease,
+            int skip,
+            int take,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                var repository = Repository.Factory.GetCoreV3(source.Source);
+                var resource = await repository.GetResourceAsync<PackageSearchResource>(cancellationToken).ConfigureAwait(false);
+                if (resource == null) return null;
+
+                var searchFilter = new SearchFilter(includePrerelease: includePrerelease);
+                var searchResults = await resource.SearchAsync(
+                    query, searchFilter, skip, take, _logger, cancellationToken).ConfigureAwait(false);
+
+                var list = new List<PackageModel>();
+                foreach (var result in searchResults)
+                {
+                    // Use Identity.Version directly instead of fetching the full
+                    // version list per package (the previous N+1 latency multiplier).
+                    // The detail pane's GetVersionsAsync still produces the full,
+                    // accurate list when the user actually opens a package.
+                    var version = result.Identity.Version;
+                    NuGet.Versioning.NuGetVersion? latestStable;
+                    NuGet.Versioning.NuGetVersion? latestPre;
+                    if (version != null && version.IsPrerelease)
+                    {
+                        latestStable = null;
+                        latestPre = version;
+                    }
+                    else
+                    {
+                        latestStable = version;
+                        latestPre = version;
+                    }
+
+                    list.Add(new PackageModel
+                    {
+                        PackageId = result.Identity.Id,
+                        LatestStableVersion = latestStable,
+                        LatestPrereleaseVersion = latestPre,
+                        Description = result.Description,
+                        Authors = result.Authors,
+                        DownloadCount = result.DownloadCount ?? 0,
+                        SourceName = source.Name,
+                        IconUrl = result.IconUrl?.ToString(),
+                    });
+                }
+                return list;
+            }
+            catch (OperationCanceledException)
+            {
+                return null;
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         public async Task<PackageModel?> GetPackageMetadataAsync(

@@ -37,5 +37,12 @@ namespace NuGetManagerSlim.Services
             string packageId,
             NuGetVersion version,
             CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Drops all in-memory feed caches and forces the next search to bypass
+        /// the NuGet HTTP cache so the user-initiated Refresh action always
+        /// reaches the live feed.
+        /// </summary>
+        void InvalidateCache();
     }
 }

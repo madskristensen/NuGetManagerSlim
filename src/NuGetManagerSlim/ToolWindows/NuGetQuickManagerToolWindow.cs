@@ -32,8 +32,9 @@ namespace NuGetManagerSlim.ToolWindows
             var projectService = new ProjectService();
             var feedService = new NuGetFeedService();
             var restoreMonitor = new RestoreMonitorService();
+            var mruService = new MruPackageService();
 
-            var viewModel = new MainViewModel(projectService, feedService, restoreMonitor);
+            var viewModel = new MainViewModel(projectService, feedService, restoreMonitor, mruService);
             await viewModel.InitializeAsync(cancellationToken);
 
             var session = (viewModel, feedService, restoreMonitor);
@@ -269,29 +270,32 @@ namespace NuGetManagerSlim.ToolWindows
 
                 protected override void OnStartSearch()
                 {
-                    try
+                    // VS may invoke OnStartSearch from a background thread (the
+                    // VsSearchTask infrastructure schedules instant searches on a
+                    // worker). Marshal to the UI thread before touching the VM,
+                    // whose ObservableCollection is owned by the WPF dispatcher.
+                    ThreadHelper.JoinableTaskFactory.Run(async () =>
                     {
-                        ThreadHelper.ThrowIfNotOnUIThread();
-                        var vm = CurrentViewModel;
-                        if (vm != null)
+                        try
                         {
-                            // CreateSearch is invoked on the UI thread by the VS search
-                            // infrastructure, so update the ViewModel directly without
-                            // marshaling. The previous JoinableTaskFactory.Run wrapper
-                            // synchronously blocked the UI thread for no benefit.
-                            vm.SearchText = SearchQuery.SearchString ?? string.Empty;
-                            SearchResults = (uint)vm.Packages.Count;
+                            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                            var vm = CurrentViewModel;
+                            if (vm != null)
+                            {
+                                vm.SearchText = SearchQuery.SearchString ?? string.Empty;
+                                SearchResults = (uint)vm.Packages.Count;
+                            }
+                            else
+                            {
+                                SearchResults = 0;
+                            }
                         }
-                        else
+                        catch (Exception ex)
                         {
-                            SearchResults = 0;
+                            await ex.LogAsync();
+                            ErrorCode = Microsoft.VisualStudio.VSConstants.E_FAIL;
                         }
-                    }
-                    catch (Exception ex)
-                    {
-                        ex.Log();
-                        ErrorCode = Microsoft.VisualStudio.VSConstants.E_FAIL;
-                    }
+                    });
 
                     base.OnStartSearch();
                 }

@@ -228,6 +228,47 @@
                        VerticalAlignment="Center"
                        Visibility="{Binding IsLoading, Converter={StaticResource BoolToVis}}" />
 
+            <!-- Skeleton placeholder rows: shown while a remote search is in flight
+                 and we don't yet have results to render. Visually communicates that
+                 work is happening without the "empty list with a spinner" pause. -->
+            <ItemsControl Focusable="False" IsHitTestVisible="False"
+                          Visibility="{Binding ShowSkeleton, Converter={StaticResource BoolToVis}}">
+                <ItemsControl.ItemsSource>
+                    <x:Array Type="{x:Type sys:Object}" xmlns:sys="clr-namespace:System;assembly=mscorlib">
+                        <sys:Object /><sys:Object /><sys:Object /><sys:Object />
+                        <sys:Object /><sys:Object /><sys:Object /><sys:Object />
+                    </x:Array>
+                </ItemsControl.ItemsSource>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Grid Margin="4,3" Height="46">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="32" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <Rectangle Grid.Column="0" Grid.RowSpan="2" Width="28" Height="28"
+                                       VerticalAlignment="Center" RadiusX="2" RadiusY="2"
+                                       Fill="{DynamicResource {x:Static vsshell:VsBrushes.PanelHyperlinkKey}}"
+                                       Opacity="0.18" />
+                            <Rectangle Grid.Column="1" Grid.Row="0" Height="11"
+                                       Margin="8,4,40,2" HorizontalAlignment="Stretch"
+                                       VerticalAlignment="Center" RadiusX="2" RadiusY="2"
+                                       Fill="{DynamicResource {x:Static vsshell:VsBrushes.PanelHyperlinkKey}}"
+                                       Opacity="0.22" />
+                            <Rectangle Grid.Column="1" Grid.Row="1" Height="9"
+                                       Margin="8,2,80,4" HorizontalAlignment="Stretch"
+                                       VerticalAlignment="Center" RadiusX="2" RadiusY="2"
+                                       Fill="{DynamicResource {x:Static vsshell:VsBrushes.PanelHyperlinkKey}}"
+                                       Opacity="0.14" />
+                        </Grid>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
             <!-- Empty state -->
             <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
                         Visibility="{Binding IsEmptyState, Converter={StaticResource BoolToVis}}">

@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Community.VisualStudio.Toolkit;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using NuGet.Versioning;
 using NuGetManagerSlim.Models;
 using NuGetManagerSlim.Services;
 
@@ -24,6 +25,12 @@ namespace NuGetManagerSlim.ViewModels
         private readonly IProjectService _projectService;
         private readonly INuGetFeedService _feedService;
         private readonly IRestoreMonitorService _restoreMonitor;
+        private readonly IMruPackageService? _mruService;
+
+        // Shared across all enrichment fan-outs to avoid the previous pattern of
+        // allocating a fresh SemaphoreSlim per call (which let rapid filter
+        // toggles spawn overlapping fan-outs that fought for sockets).
+        private static readonly SemaphoreSlim s_enrichmentThrottle = new(4, 4);
 
         private const int MaxSearchHistory = 20;
         private const int MaxOperationLog = 500;
@@ -62,7 +69,8 @@ namespace NuGetManagerSlim.ViewModels
         public ObservableCollection<string> OperationLog { get; } = [];
 
         public bool HasPackages => Packages.Count > 0;
-        public bool IsEmptyState => !IsLoading && Packages.Count == 0;
+        public bool IsEmptyState => !IsLoading && !ShowSkeleton && Packages.Count == 0;
+        public bool ShowSkeleton => IsRemoteLoading && Packages.Count == 0;
         public bool HasSelectedPackage => SelectedPackage != null;
         public bool HasProject => CurrentProject != null;
 
@@ -86,12 +94,22 @@ namespace NuGetManagerSlim.ViewModels
             IProjectService projectService,
             INuGetFeedService feedService,
             IRestoreMonitorService restoreMonitor)
+            : this(projectService, feedService, restoreMonitor, mruService: null)
+        {
+        }
+
+        public MainViewModel(
+            IProjectService projectService,
+            INuGetFeedService feedService,
+            IRestoreMonitorService restoreMonitor,
+            IMruPackageService? mruService)
         {
             _projectService = projectService;
             _feedService = feedService;
             _restoreMonitor = restoreMonitor;
+            _mruService = mruService;
 
-            _debounceTimer = new System.Timers.Timer(200) { AutoReset = false };
+            _debounceTimer = new System.Timers.Timer(300) { AutoReset = false };
             _debounceTimer.Elapsed += OnDebounceElapsed;
 
             _restoreMonitor.RestoreStatusChanged += OnRestoreStatusChanged;
@@ -154,6 +172,17 @@ namespace NuGetManagerSlim.ViewModels
         }
         partial void OnFilterPrereleaseChanged(bool value) => _ = ReloadPackagesAsync();
 
+        partial void OnIsRemoteLoadingChanged(bool value)
+        {
+            OnPropertyChanged(nameof(ShowSkeleton));
+            OnPropertyChanged(nameof(IsEmptyState));
+        }
+
+        partial void OnIsLoadingChanged(bool value)
+        {
+            OnPropertyChanged(nameof(IsEmptyState));
+        }
+
         partial void OnCurrentProjectChanged(ProjectScopeModel? value)
         {
             _restoreMonitor.StopMonitoring();
@@ -211,11 +240,15 @@ namespace NuGetManagerSlim.ViewModels
                     var installedTask = CurrentProject != null
                         ? _projectService.GetInstalledPackagesAsync(CurrentProject, ct)
                         : Task.FromResult<IReadOnlyList<PackageModel>>(Array.Empty<PackageModel>());
-                    await Task.WhenAll(searchTask, installedTask);
+                    var mruTask = _mruService != null
+                        ? _mruService.GetRecentAsync(ct)
+                        : Task.FromResult<IReadOnlyList<PackageModel>>(Array.Empty<PackageModel>());
+                    await Task.WhenAll(searchTask, installedTask, mruTask);
                     ct.ThrowIfCancellationRequested();
                     var results = await searchTask;
                     var installed = await installedTask;
-                    ApplyRemoteResults(results, BuildInstalledMap(installed));
+                    var mru = await mruTask;
+                    ApplyRemoteResults(RankByMru(results, mru), BuildInstalledMap(installed));
                 }
                 else
                 {
@@ -244,6 +277,12 @@ namespace NuGetManagerSlim.ViewModels
         {
             if (string.IsNullOrEmpty(query))
                 return (query ?? string.Empty, null);
+
+            // Fast-path: ~99% of queries don't contain a `source:` token, so skip
+            // both regex matches when there's nothing to do. This runs on every
+            // keystroke after debounce.
+            if (query.IndexOf("source:", StringComparison.OrdinalIgnoreCase) < 0)
+                return (query, null);
 
             var sources = new List<string>();
             var stripped = SourceFilterRegex.Replace(query, m =>
@@ -283,6 +322,7 @@ namespace NuGetManagerSlim.ViewModels
                     Packages.Add(row);
 
                 EnrichInstalledMetadataInBackground(Packages.ToList());
+                SeedMruFromInstalled(installed);
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
@@ -310,11 +350,10 @@ namespace NuGetManagerSlim.ViewModels
 
             _ = Task.Run(async () =>
             {
-                using var throttle = new SemaphoreSlim(4);
                 var tasks = rows.Select(async row =>
                 {
                     if (ct.IsCancellationRequested) return;
-                    await throttle.WaitAsync(ct).ConfigureAwait(false);
+                    await s_enrichmentThrottle.WaitAsync(ct).ConfigureAwait(false);
                     try
                     {
                         var meta = await _feedService.GetPackageMetadataAsync(row.PackageId, ct).ConfigureAwait(false);
@@ -332,11 +371,84 @@ namespace NuGetManagerSlim.ViewModels
                     }
                     catch (OperationCanceledException) { }
                     catch (Exception ex) { await ex.LogAsync(); }
-                    finally { throttle.Release(); }
+                    finally { s_enrichmentThrottle.Release(); }
                 });
                 try { await Task.WhenAll(tasks).ConfigureAwait(false); }
                 catch (OperationCanceledException) { }
             }, ct);
+        }
+
+        private void SeedMruFromInstalled(IReadOnlyList<PackageModel> installed)
+        {
+            if (_mruService == null || installed == null || installed.Count == 0) return;
+            _ = Task.Run(async () =>
+            {
+                foreach (var pkg in installed)
+                {
+                    if (pkg.IsTransitive) continue;
+                    if (string.IsNullOrEmpty(pkg.PackageId)) continue;
+                    try { await _mruService.RecordAsync(pkg, CancellationToken.None).ConfigureAwait(false); }
+                    catch (Exception ex) { await ex.LogAsync(); }
+                }
+            });
+        }
+
+        private void RecordMru(PackageRowViewModel row, NuGetVersion? installedVersion)
+        {
+            if (_mruService == null || row == null) return;
+            var snapshot = row.Model;
+            var pkg = new PackageModel
+            {
+                PackageId = snapshot.PackageId,
+                InstalledVersion = installedVersion ?? snapshot.InstalledVersion,
+                LatestStableVersion = snapshot.LatestStableVersion,
+                LatestPrereleaseVersion = snapshot.LatestPrereleaseVersion,
+                Authors = snapshot.Authors,
+                Description = snapshot.Description,
+                IconUrl = snapshot.IconUrl,
+                SourceName = snapshot.SourceName,
+            };
+            _ = Task.Run(async () =>
+            {
+                try { await _mruService.RecordAsync(pkg, CancellationToken.None).ConfigureAwait(false); }
+                catch (Exception ex) { await ex.LogAsync(); }
+            });
+        }
+
+        // Stable re-ranking of search results: any package the user has previously
+        // installed or updated (per the MRU) bubbles to the top in MRU order, while
+        // everything else keeps the feed's original ordering.
+        public static IReadOnlyList<PackageModel> RankByMru(IReadOnlyList<PackageModel> results, IReadOnlyList<PackageModel> mru)
+        {
+            if (results == null || results.Count == 0)
+                return results ?? (IReadOnlyList<PackageModel>)Array.Empty<PackageModel>();
+            if (mru == null || mru.Count == 0) return results;
+
+            var rankById = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            for (var i = 0; i < mru.Count; i++)
+            {
+                var id = mru[i].PackageId;
+                if (string.IsNullOrEmpty(id)) continue;
+                if (!rankById.ContainsKey(id))
+                    rankById[id] = i;
+            }
+
+            var promoted = new List<PackageModel>(results.Count);
+            var rest = new List<PackageModel>(results.Count);
+            foreach (var r in results)
+            {
+                if (rankById.ContainsKey(r.PackageId))
+                    promoted.Add(r);
+                else
+                    rest.Add(r);
+            }
+
+            promoted.Sort((a, b) => rankById[a.PackageId].CompareTo(rankById[b.PackageId]));
+
+            var ranked = new List<PackageModel>(results.Count);
+            ranked.AddRange(promoted);
+            ranked.AddRange(rest);
+            return ranked;
         }
 
         private static Dictionary<string, PackageModel> BuildInstalledMap(IReadOnlyList<PackageModel> installed)
@@ -426,6 +538,9 @@ namespace NuGetManagerSlim.ViewModels
         [RelayCommand]
         private async Task RefreshAsync()
         {
+            // User-initiated Refresh: drop cached search results so the next
+            // query goes back to the feed, then reload.
+            _feedService.InvalidateCache();
             OperationLog.Clear();
             await ReloadPackagesAsync();
         }
@@ -462,6 +577,7 @@ namespace NuGetManagerSlim.ViewModels
                 SetStatus($"Updating {row.PackageId}…");
                 if (CurrentProject?.ProjectFullPath != null && row.LatestStableVersion != null)
                     await _projectService.UpdatePackageAsync(CurrentProject.ProjectFullPath, row.PackageId, row.LatestStableVersion, CancellationToken.None);
+                RecordMru(row, row.LatestStableVersion);
                 var done = $"✓ Updated {row.PackageId} → {row.LatestStableVersion}";
                 SetStatus(done);
                 AppendOperationLog($"[{DateTime.Now:HH:mm:ss}] {done}");
@@ -493,6 +609,7 @@ namespace NuGetManagerSlim.ViewModels
                 {
                     await _projectService.InstallPackageAsync(CurrentProject.ProjectFullPath, row.PackageId, version, CancellationToken.None);
                 }
+                RecordMru(row, version);
                 var done = $"✓ Installed {row.PackageId} {version}";
                 SetStatus(done);
                 AppendOperationLog($"[{DateTime.Now:HH:mm:ss}] {done}");
