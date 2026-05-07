@@ -25,13 +25,13 @@
 		</Menus>
 
 		<Groups>
-			<Group guid="NuGetManagerSlim" id="NuGetQuickManagerToolbarGroup" priority="0x0200">
+			<Group guid="NuGetManagerSlim" id="NuGetQuickManagerToolbarGroup" priority="0x0100">
 				<Parent guid="NuGetManagerSlim" id="NuGetQuickManagerToolbar" />
 			</Group>
 			<Group guid="NuGetManagerSlim" id="ViewModeMenuGroup" priority="0x0000">
 				<Parent guid="NuGetManagerSlim" id="ViewModeMenuController" />
 			</Group>
-			<Group guid="NuGetManagerSlim" id="NuGetQuickManagerToolbarRefreshGroup" priority="0x0100">
+			<Group guid="NuGetManagerSlim" id="NuGetQuickManagerToolbarRefreshGroup" priority="0x0200">
 				<Parent guid="NuGetManagerSlim" id="NuGetQuickManagerToolbar" />
 			</Group>
 			<Group guid="NuGetManagerSlim" id="ProjectContextGroup" priority="0x0600">

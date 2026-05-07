@@ -1,10 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
   <Metadata>
-    <Identity Id="NuGetManagerSlim.02b52d4a-302c-45d8-9d1f-9cc4759f30be" Version="1.0.901" Language="en-US" Publisher="NuGetManagerSlim" />
-    <DisplayName>NuGet Quick Manager</DisplayName>
+    <Identity Id="NuGetManagerSlim.02b52d4a-302c-45d8-9d1f-9cc4759f30be" Version="1.0.901" Language="en-US" Publisher="Mads Kristensen" />
+    <DisplayName>NuGet Manager Slim</DisplayName>
     <Description xml:space="preserve">An alternative NuGet Package Manager for Visual Studio — unified, async-first, with inline progress and per-framework version state.</Description>
     <Tags>nuget, package manager, packages</Tags>
+    <Icon>Resources\Icon.png</Icon>
+    <License>Resources\License.txt</License>
+    <MoreInfo>https://github.com/madskristensen/NuGetManagerSlim</MoreInfo>
   </Metadata>
   <Installation>
     <InstallationTarget Id="Microsoft.VisualStudio.Community" Version="[17.0,)">

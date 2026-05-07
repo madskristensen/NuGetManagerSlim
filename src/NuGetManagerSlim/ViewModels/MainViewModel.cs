@@ -34,7 +34,7 @@ namespace NuGetManagerSlim.ViewModels
 
         [ObservableProperty] private string _searchText = string.Empty;
         [ObservableProperty] private ProjectScopeModel? _currentProject;
-        [ObservableProperty] private bool _filterInstalled = true;
+        [ObservableProperty] private bool _filterInstalled;
         [ObservableProperty] private bool _filterUpdates;
         [ObservableProperty] private bool _filterPrerelease;
         [ObservableProperty] private bool _isLoading;
@@ -134,14 +134,14 @@ namespace NuGetManagerSlim.ViewModels
         partial void OnFilterInstalledChanged(bool value)
         {
             OnPropertyChanged(nameof(ViewMode));
-            _ = ApplyFiltersAsync();
+            _ = ReloadPackagesAsync();
         }
         partial void OnFilterUpdatesChanged(bool value)
         {
             OnPropertyChanged(nameof(ViewMode));
-            _ = ApplyFiltersAsync();
+            _ = ReloadPackagesAsync();
         }
-        partial void OnFilterPrereleaseChanged(bool value) => _ = ApplyFiltersAsync();
+        partial void OnFilterPrereleaseChanged(bool value) => _ = ReloadPackagesAsync();
 
         partial void OnCurrentProjectChanged(ProjectScopeModel? value)
         {
@@ -181,12 +181,6 @@ namespace NuGetManagerSlim.ViewModels
         private async Task SearchRemoteAsync()
         {
             var query = SearchText;
-            if (string.IsNullOrWhiteSpace(query) && !FilterInstalled && !FilterUpdates)
-            {
-                Packages.Clear();
-                UpdateEmptyState();
-                return;
-            }
 
             _searchCts?.Cancel();
             _searchCts = new CancellationTokenSource();
@@ -201,9 +195,8 @@ namespace NuGetManagerSlim.ViewModels
             {
                 if (!FilterInstalled && !FilterUpdates)
                 {
-                    // Browse / remote search mode
                     IsRemoteLoading = true;
-                    var results = await _feedService.SearchAsync(cleanQuery, FilterPrerelease, 0, 50, ct, sourceFilter);
+                    var results = await _feedService.SearchAsync(cleanQuery ?? string.Empty, FilterPrerelease, 0, 50, ct, sourceFilter);
                     ct.ThrowIfCancellationRequested();
                     ApplyRemoteResults(results);
                 }

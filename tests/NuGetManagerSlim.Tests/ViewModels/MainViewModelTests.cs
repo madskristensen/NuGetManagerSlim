@@ -112,10 +112,10 @@ namespace NuGetManagerSlim.Tests.ViewModels
         }
 
         [Fact]
-        public void FilterInstalled_DefaultIsTrue()
+        public void FilterInstalled_DefaultIsFalse()
         {
             var (vm, _, _, _) = CreateViewModel();
-            Assert.True(vm.FilterInstalled);
+            Assert.False(vm.FilterInstalled);
         }
 
         [Fact]
@@ -133,10 +133,10 @@ namespace NuGetManagerSlim.Tests.ViewModels
         }
 
         [Fact]
-        public void ViewMode_DefaultIsInstalled()
+        public void ViewMode_DefaultIsBrowse()
         {
             var (vm, _, _, _) = CreateViewModel();
-            Assert.Equal(PackageViewMode.Installed, vm.ViewMode);
+            Assert.Equal(PackageViewMode.Browse, vm.ViewMode);
         }
 
         [Fact]

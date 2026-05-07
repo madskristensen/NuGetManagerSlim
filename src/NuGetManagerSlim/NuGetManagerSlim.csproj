@@ -27,7 +27,10 @@
 	<AvailableItemName Include="VSCTCompile" />
   </ItemGroup>
   <ItemGroup>
+	<None Remove="Resources\Icon.png" />
 	<None Remove="VSCommandTable.vsct" />
+	<Content Include="..\..\LICENSE.txt" Link="Resources\LICENSE.txt" />
+	<Content Include="Resources\Icon.png" />
 	<VSCTCompile Include="VSCommandTable.vsct">
 	  <ResourceName>Menus.ctmenu</ResourceName>
 	  <Generator>VsctGenerator</Generator>
@@ -74,7 +77,7 @@
 	  <PrivateAssets>all</PrivateAssets>
 	</PackageReference>
 	<PackageReference Include="NuGet.Protocol" Version="6.*" />
-	<PackageReference Include="NuGet.VisualStudio" Version="6.0.2" ExcludeAssets="runtime" />
+	<PackageReference Include="NuGet.VisualStudio" Version="5.11.6" ExcludeAssets="runtime" />
 	<PackageReference Include="CommunityToolkit.Mvvm" Version="8.*" />
   </ItemGroup>
 
