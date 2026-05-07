@@ -23,13 +23,16 @@ namespace NuGetManagerSlim
     internal sealed partial class PackageIds
     {
         public const int NuGetQuickManagerGroup = 0x1020;
-        public const int OpenNuGetQuickManagerCommand = 0x0101;
         public const int NuGetQuickManagerToolbar = 0x1100;
         public const int NuGetQuickManagerToolbarGroup = 0x1101;
         public const int NuGetQuickManagerToolbarRefreshGroup = 0x1102;
-        public const int FilterInstalledCommand = 0x0200;
-        public const int FilterUpdatesCommand = 0x0201;
-        public const int FilterPrereleaseCommand = 0x0202;
+        public const int ViewModeMenuController = 0x1104;
+        public const int ViewModeMenuGroup = 0x1105;
+        public const int ViewModeBrowseCommand = 0x0210;
+        public const int ViewModeInstalledCommand = 0x0211;
+        public const int ViewModeUpdatesCommand = 0x0212;
         public const int RefreshCommand = 0x0203;
+        public const int OpenForProjectCommand = 0x0204;
+        public const int ProjectContextGroup = 0x1200;
     }
 }

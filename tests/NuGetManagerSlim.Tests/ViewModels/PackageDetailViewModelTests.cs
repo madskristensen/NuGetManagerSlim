@@ -22,7 +22,7 @@ namespace NuGetManagerSlim.Tests.ViewModels
             feedMock.Setup(f => f.GetVersionsAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new List<NuGetVersion> { NuGetVersion.Parse("2.0.0"), NuGetVersion.Parse("1.0.0") });
 
-            feedMock.Setup(f => f.GetPackageMetadataAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            feedMock.Setup(f => f.GetPackageMetadataAsync(It.IsAny<string>(), It.IsAny<NuGetVersion>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new PackageModel
                 {
                     PackageId = "TestPkg",
@@ -58,7 +58,7 @@ namespace NuGetManagerSlim.Tests.ViewModels
         {
             var (vm, _, _, _) = CreateViewModel();
             var row = MakeRow("Newtonsoft.Json");
-            await vm.LoadAsync(row, ProjectScopeModel.EntireSolution, false, CancellationToken.None);
+            await vm.LoadAsync(row, new ProjectScopeModel { DisplayName = "MyApp", ProjectFullPath = @"C:\x\x.csproj" }, false, CancellationToken.None);
             Assert.Equal("Newtonsoft.Json", vm.PackageId);
         }
 
@@ -66,7 +66,7 @@ namespace NuGetManagerSlim.Tests.ViewModels
         public async Task LoadAsync_PopulatesAvailableVersions()
         {
             var (vm, _, _, _) = CreateViewModel();
-            await vm.LoadAsync(MakeRow(), ProjectScopeModel.EntireSolution, false, CancellationToken.None);
+            await vm.LoadAsync(MakeRow(), new ProjectScopeModel { DisplayName = "MyApp", ProjectFullPath = @"C:\x\x.csproj" }, false, CancellationToken.None);
             Assert.Equal(2, vm.AvailableVersions.Count);
             Assert.Equal(NuGetVersion.Parse("2.0.0"), vm.AvailableVersions[0]);
         }
@@ -76,7 +76,7 @@ namespace NuGetManagerSlim.Tests.ViewModels
         {
             var (vm, _, _, _) = CreateViewModel();
             var row = MakeRow(installed: "1.0.0");
-            await vm.LoadAsync(row, ProjectScopeModel.EntireSolution, false, CancellationToken.None);
+            await vm.LoadAsync(row, new ProjectScopeModel { DisplayName = "MyApp", ProjectFullPath = @"C:\x\x.csproj" }, false, CancellationToken.None);
             Assert.Equal(NuGetVersion.Parse("1.0.0"), vm.SelectedVersion);
         }
 
@@ -84,7 +84,7 @@ namespace NuGetManagerSlim.Tests.ViewModels
         public async Task LoadAsync_SetsDescription()
         {
             var (vm, _, _, _) = CreateViewModel();
-            await vm.LoadAsync(MakeRow(), ProjectScopeModel.EntireSolution, false, CancellationToken.None);
+            await vm.LoadAsync(MakeRow(), new ProjectScopeModel { DisplayName = "MyApp", ProjectFullPath = @"C:\x\x.csproj" }, false, CancellationToken.None);
             Assert.Equal("A test package", vm.Description);
         }
 
@@ -92,7 +92,7 @@ namespace NuGetManagerSlim.Tests.ViewModels
         public async Task LoadAsync_SetsAuthors()
         {
             var (vm, _, _, _) = CreateViewModel();
-            await vm.LoadAsync(MakeRow(), ProjectScopeModel.EntireSolution, false, CancellationToken.None);
+            await vm.LoadAsync(MakeRow(), new ProjectScopeModel { DisplayName = "MyApp", ProjectFullPath = @"C:\x\x.csproj" }, false, CancellationToken.None);
             Assert.Equal("Test Author", vm.Authors);
         }
 
@@ -100,7 +100,7 @@ namespace NuGetManagerSlim.Tests.ViewModels
         public async Task LoadAsync_SetsLicense()
         {
             var (vm, _, _, _) = CreateViewModel();
-            await vm.LoadAsync(MakeRow(), ProjectScopeModel.EntireSolution, false, CancellationToken.None);
+            await vm.LoadAsync(MakeRow(), new ProjectScopeModel { DisplayName = "MyApp", ProjectFullPath = @"C:\x\x.csproj" }, false, CancellationToken.None);
             Assert.Equal("MIT", vm.License);
         }
 
@@ -108,7 +108,7 @@ namespace NuGetManagerSlim.Tests.ViewModels
         public async Task LoadAsync_FormatsDownloadCount()
         {
             var (vm, _, _, _) = CreateViewModel();
-            await vm.LoadAsync(MakeRow(), ProjectScopeModel.EntireSolution, false, CancellationToken.None);
+            await vm.LoadAsync(MakeRow(), new ProjectScopeModel { DisplayName = "MyApp", ProjectFullPath = @"C:\x\x.csproj" }, false, CancellationToken.None);
             Assert.Equal("1.5M", vm.DownloadCountDisplay);
         }
 
@@ -116,7 +116,7 @@ namespace NuGetManagerSlim.Tests.ViewModels
         public async Task LoadAsync_PopulatesDependencies()
         {
             var (vm, _, _, _) = CreateViewModel();
-            await vm.LoadAsync(MakeRow(), ProjectScopeModel.EntireSolution, false, CancellationToken.None);
+            await vm.LoadAsync(MakeRow(), new ProjectScopeModel { DisplayName = "MyApp", ProjectFullPath = @"C:\x\x.csproj" }, false, CancellationToken.None);
             Assert.Single(vm.Dependencies);
             Assert.Equal("Dep1", vm.Dependencies[0].PackageId);
         }
@@ -126,7 +126,7 @@ namespace NuGetManagerSlim.Tests.ViewModels
         {
             var (vm, _, _, _) = CreateViewModel();
             var row = MakeRow(installed: "1.0.0");
-            await vm.LoadAsync(row, ProjectScopeModel.EntireSolution, false, CancellationToken.None);
+            await vm.LoadAsync(row, new ProjectScopeModel { DisplayName = "MyApp", ProjectFullPath = @"C:\x\x.csproj" }, false, CancellationToken.None);
             Assert.True(vm.CanUninstall);
         }
 
@@ -135,7 +135,7 @@ namespace NuGetManagerSlim.Tests.ViewModels
         {
             var (vm, _, _, _) = CreateViewModel();
             var row = MakeRow(installed: null);
-            await vm.LoadAsync(row, ProjectScopeModel.EntireSolution, false, CancellationToken.None);
+            await vm.LoadAsync(row, new ProjectScopeModel { DisplayName = "MyApp", ProjectFullPath = @"C:\x\x.csproj" }, false, CancellationToken.None);
             Assert.True(vm.CanInstall);
             Assert.False(vm.CanUninstall);
         }
@@ -145,17 +145,17 @@ namespace NuGetManagerSlim.Tests.ViewModels
         {
             var (vm, _, _, _) = CreateViewModel();
             var row = MakeRow(installed: "1.0.0", latestStable: "2.0.0");
-            await vm.LoadAsync(row, ProjectScopeModel.EntireSolution, false, CancellationToken.None);
+            await vm.LoadAsync(row, new ProjectScopeModel { DisplayName = "MyApp", ProjectFullPath = @"C:\x\x.csproj" }, false, CancellationToken.None);
             Assert.True(vm.CanUpdate);
         }
 
         [Fact]
-        public async Task LoadAsync_EntireSolutionScope_WithUpdate_CanUpdateAllProjects()
+        public async Task LoadAsync_AnyScope_CannotUpdateAllProjects()
         {
             var (vm, _, _, _) = CreateViewModel();
             var row = MakeRow(installed: "1.0.0", latestStable: "2.0.0");
-            await vm.LoadAsync(row, ProjectScopeModel.EntireSolution, false, CancellationToken.None);
-            Assert.True(vm.CanUpdateAllProjects);
+            await vm.LoadAsync(row, new ProjectScopeModel { DisplayName = "MyApp", ProjectFullPath = @"C:\x\x.csproj" }, false, CancellationToken.None);
+            Assert.False(vm.CanUpdateAllProjects);
         }
 
         [Fact]
@@ -169,3 +169,4 @@ namespace NuGetManagerSlim.Tests.ViewModels
         }
     }
 }
+

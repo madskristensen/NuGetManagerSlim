@@ -4,62 +4,224 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:vm="clr-namespace:NuGetManagerSlim.ViewModels"
+             xmlns:vsshell="clr-namespace:Microsoft.VisualStudio.Shell;assembly=Microsoft.VisualStudio.Shell.15.0"
+             xmlns:vsui="clr-namespace:Microsoft.VisualStudio.PlatformUI;assembly=Microsoft.VisualStudio.Shell.15.0"
+             xmlns:imaging="clr-namespace:Microsoft.VisualStudio.Imaging;assembly=Microsoft.VisualStudio.Imaging"
+             xmlns:catalog="clr-namespace:Microsoft.VisualStudio.Imaging;assembly=Microsoft.VisualStudio.ImageCatalog"
+             vsui:ThemedDialogStyleLoader.UseDefaultThemedDialogStyles="True"
+             Background="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowBackgroundKey}}"
+             Foreground="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowTextKey}}"
+             TextElement.Foreground="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowTextKey}}"
+             TextElement.FontFamily="{DynamicResource VsFont.EnvironmentFontFamily}"
+             TextElement.FontSize="{DynamicResource VsFont.EnvironmentFontSize}"
              mc:Ignorable="d"
              d:DesignHeight="700" d:DesignWidth="420">
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
-        <Style x:Key="FilterToggleStyle" TargetType="ToggleButton">
-            <Setter Property="Padding" Value="8,3" />
-            <Setter Property="Margin" Value="2,0" />
+
+        <!-- Themed Button used everywhere in the tool window. -->
+        <Style TargetType="Button">
+            <Setter Property="Background" Value="{DynamicResource {x:Static vsui:CommonControlsColors.ButtonBrushKey}}" />
+            <Setter Property="Foreground" Value="{DynamicResource {x:Static vsui:CommonControlsColors.ButtonTextBrushKey}}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource {x:Static vsui:CommonControlsColors.ButtonBorderBrushKey}}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="10,3" />
             <Setter Property="FontSize" Value="11" />
-            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="SnapsToDevicePixels" Value="True" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                Padding="{TemplateBinding Padding}"
+                                SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                              RecognizesAccessKey="True" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background"
+                                        Value="{DynamicResource {x:Static vsui:CommonControlsColors.ButtonHoverBrushKey}}" />
+                                <Setter TargetName="Bd" Property="BorderBrush"
+                                        Value="{DynamicResource {x:Static vsui:CommonControlsColors.ButtonBorderHoverBrushKey}}" />
+                                <Setter Property="Foreground"
+                                        Value="{DynamicResource {x:Static vsui:CommonControlsColors.ButtonHoverTextBrushKey}}" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Background"
+                                        Value="{DynamicResource {x:Static vsui:CommonControlsColors.ButtonPressedBrushKey}}" />
+                                <Setter TargetName="Bd" Property="BorderBrush"
+                                        Value="{DynamicResource {x:Static vsui:CommonControlsColors.ButtonBorderPressedBrushKey}}" />
+                                <Setter Property="Foreground"
+                                        Value="{DynamicResource {x:Static vsui:CommonControlsColors.ButtonPressedTextBrushKey}}" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Bd" Property="Background"
+                                        Value="{DynamicResource {x:Static vsui:CommonControlsColors.ButtonDisabledBrushKey}}" />
+                                <Setter TargetName="Bd" Property="BorderBrush"
+                                        Value="{DynamicResource {x:Static vsui:CommonControlsColors.ButtonBorderDisabledBrushKey}}" />
+                                <Setter Property="Foreground"
+                                        Value="{DynamicResource {x:Static vsui:CommonControlsColors.ButtonDisabledTextBrushKey}}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
+
+        <!-- Borderless icon-only button for the install/update glyph in each row. -->
+        <Style x:Key="IconButtonStyle" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="4,2" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Foreground" Value="{DynamicResource {x:Static vsui:EnvironmentColors.AccentMediumBrushKey}}" />
+        </Style>
+
+        <!-- Themed ComboBox/CheckBox/Expander/Hyperlink styles are supplied by
+             vsui:ThemedDialogStyleLoader.UseDefaultThemedDialogStyles on the root. -->
+
+        <!-- Compact, low-key Expander toggle: a small chevron instead of the loud
+             white circle that the default WPF template renders. -->
+        <Style x:Key="ExpanderChevronToggleStyle" TargetType="ToggleButton">
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowTextKey}}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border Background="Transparent" Padding="2">
+                            <StackPanel Orientation="Horizontal">
+                                <Path x:Name="Chevron"
+                                      Width="9" Height="9"
+                                      Stretch="Uniform"
+                                      Data="M 0 0 L 4 4 L 0 8 Z"
+                                      Fill="{DynamicResource {x:Static vsshell:VsBrushes.GrayTextKey}}"
+                                      VerticalAlignment="Center" />
+                                <ContentPresenter Margin="6,0,0,0" VerticalAlignment="Center"
+                                                  RecognizesAccessKey="True" />
+                            </StackPanel>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Chevron" Property="Data"
+                                        Value="M 0 0 L 8 0 L 4 4 Z" />
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Chevron" Property="Fill"
+                                        Value="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowTextKey}}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="Expander">
+            <Setter Property="Foreground" Value="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowTextKey}}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Expander">
+                        <DockPanel>
+                            <ToggleButton DockPanel.Dock="Top"
+                                          Style="{StaticResource ExpanderChevronToggleStyle}"
+                                          IsChecked="{Binding IsExpanded, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
+                                          Content="{TemplateBinding Header}"
+                                          Foreground="{TemplateBinding Foreground}" />
+                            <ContentPresenter x:Name="ExpandSite"
+                                              Margin="14,2,0,0"
+                                              Visibility="Collapsed" />
+                        </DockPanel>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsExpanded" Value="True">
+                                <Setter TargetName="ExpandSite" Property="Visibility" Value="Visible" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style x:Key="MutedTextStyle" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}" />
+            <Setter Property="Foreground" Value="{DynamicResource {x:Static vsshell:VsBrushes.GrayTextKey}}" />
             <Setter Property="FontSize" Value="11" />
         </Style>
         <Style x:Key="VersionBadgeStyle" TargetType="TextBlock">
             <Setter Property="FontSize" Value="10" />
             <Setter Property="Padding" Value="3,1" />
-            <Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}" />
+            <Setter Property="Foreground" Value="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowTextKey}}" />
+        </Style>
+        <!-- Themed ListBox/ListBoxItem so selection follows the active VS theme. -->
+        <Style TargetType="ListBox">
+            <Setter Property="Background" Value="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowBackgroundKey}}" />
+            <Setter Property="Foreground" Value="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowTextKey}}" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+        <Style TargetType="ListBoxItem">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowTextKey}}" />
+            <Setter Property="Padding" Value="0,5" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="Bd"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                Padding="{TemplateBinding Padding}"
+                                SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="Stretch" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background"
+                                        Value="{DynamicResource {x:Static vsui:TreeViewColors.SelectedItemInactiveBrushKey}}" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Bd" Property="Background"
+                                        Value="{DynamicResource {x:Static vsui:TreeViewColors.SelectedItemActiveBrushKey}}" />
+                                <Setter Property="Foreground"
+                                        Value="{DynamicResource {x:Static vsui:TreeViewColors.SelectedItemActiveTextBrushKey}}" />
+                            </Trigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsSelected" Value="True" />
+                                    <Condition Property="Selector.IsSelectionActive" Value="False" />
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="Bd" Property="Background"
+                                        Value="{DynamicResource {x:Static vsui:TreeViewColors.SelectedItemInactiveBrushKey}}" />
+                                <Setter Property="Foreground"
+                                        Value="{DynamicResource {x:Static vsui:TreeViewColors.SelectedItemInactiveTextBrushKey}}" />
+                            </MultiTrigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
     </UserControl.Resources>
-    <Grid>
+    <Grid Background="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowBackgroundKey}}">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="180" MinHeight="100" MaxHeight="350" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <!-- Project scope + Source selector
-             (Filter toggles and search live in the native VS toolbar / search bar provided by the ToolWindowPane.) -->
-        <Border Grid.Row="0" BorderThickness="0,0,0,1"
-                BorderBrush="{DynamicResource {x:Static SystemColors.ControlDarkBrushKey}}"
-                Padding="6,4">
-            <WrapPanel Orientation="Horizontal">
-                <ComboBox x:Name="ScopeCombo"
-                          ItemsSource="{Binding ProjectScopes}"
-                          SelectedItem="{Binding SelectedScope}"
-                          DisplayMemberPath="DisplayName"
-                          MinWidth="120"
-                          Margin="0,0,6,2"
-                          AutomationProperties.Name="Project scope"
-                          ToolTip="Select a project or entire solution" />
-
-                <ToggleButton Content="Source &#x25BC;"
-                              IsChecked="{Binding IsSourcePanelOpen}"
-                              Style="{StaticResource FilterToggleStyle}"
-                              AutomationProperties.Name="Toggle source panel"
-                              Margin="4,0,0,2" />
-            </WrapPanel>
-        </Border>
+        <!-- Project scope, view-mode toggle, prerelease toggle, search and refresh
+             all live in the native VS toolbar / search bar provided by the ToolWindowPane. -->
 
         <!-- E: Package list -->
-        <Grid Grid.Row="1">
+        <Grid Grid.Row="0">
             <!-- Loading indicator -->
             <TextBlock Text="Loading…"
                        HorizontalAlignment="Center"
@@ -85,7 +247,7 @@
                      HorizontalContentAlignment="Stretch">
                 <ListBox.ItemTemplate>
                     <DataTemplate DataType="{x:Type vm:PackageRowViewModel}">
-                        <Grid Margin="4,3">
+                        <Grid Margin="4,3" Background="Transparent">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="32" />
                                 <ColumnDefinition Width="*" />
@@ -96,52 +258,87 @@
                                 <RowDefinition />
                             </Grid.RowDefinitions>
 
-                            <!-- Icon / spinner -->
-                            <Border Grid.Column="0" Grid.RowSpan="2"
-                                    Width="28" Height="28"
-                                    Background="{DynamicResource {x:Static SystemColors.ControlBrushKey}}"
-                                    CornerRadius="4"
-                                    VerticalAlignment="Center">
-                                <TextBlock Text="&#x1F4E6;" FontSize="16"
-                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
-                            </Border>
+                            <!-- Package icon (with NuGetNoColor fallback when missing or fails to load). No border / chrome. -->
+                            <Grid Grid.Column="0" Grid.RowSpan="2"
+                                  Width="32" Height="32"
+                                  VerticalAlignment="Center">
+                                <imaging:CrispImage Width="20" Height="20"
+                                                    Moniker="{x:Static catalog:KnownMonikers.NuGetNoColor}"
+                                                    HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                <Image Source="{Binding IconUrl, IsAsync=True, TargetNullValue={x:Null}, FallbackValue={x:Null}}"
+                                       Width="28" Height="28"
+                                       Stretch="Uniform"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                       RenderOptions.BitmapScalingMode="HighQuality"
+                                       Visibility="{Binding HasIcon, Converter={StaticResource BoolToVis}}"
+                                       ImageFailed="PackageIcon_ImageFailed" />
+                            </Grid>
 
                             <!-- Package ID + version -->
-                            <StackPanel Grid.Column="1" Grid.Row="0" Orientation="Horizontal" Margin="6,0,0,0">
-                                <TextBlock Text="{Binding PackageId}" FontWeight="SemiBold" FontSize="13"
+                            <StackPanel Grid.Column="1" Grid.Row="0" Orientation="Horizontal" Margin="8,0,0,0">
+                                <TextBlock Text="{Binding PackageId}" FontSize="12"
                                            TextTrimming="CharacterEllipsis"
-                                           Foreground="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}" />
-                                <TextBlock Text=" &#x2713;" Foreground="Green"
+                                           VerticalAlignment="Center" />
+                                <TextBlock Text=" &#x2713;"
+                                           Foreground="#2E8B57"
+                                           VerticalAlignment="Center"
                                            Visibility="{Binding IsInstalled, Converter={StaticResource BoolToVis}}"
                                            ToolTip="Installed" />
                                 <TextBlock Text=" [pre]" FontSize="10" VerticalAlignment="Center"
-                                           Foreground="{DynamicResource {x:Static SystemColors.GrayTextBrushKey}}"
+                                           Foreground="{DynamicResource {x:Static vsshell:VsBrushes.GrayTextKey}}"
                                            Visibility="{Binding IsPrerelease, Converter={StaticResource BoolToVis}}" />
                             </StackPanel>
 
                             <!-- Version info + update badge -->
-                            <StackPanel Grid.Column="1" Grid.Row="1" Orientation="Horizontal" Margin="6,1,0,0">
+                            <StackPanel Grid.Column="1" Grid.Row="1" Orientation="Horizontal" Margin="8,1,0,0">
                                 <TextBlock Text="{Binding InstalledVersionDisplay}"
                                            Style="{StaticResource MutedTextStyle}" />
-                                <TextBlock Text="{Binding UpdateBadge}" Foreground="#0078D4"
+                                <TextBlock Text="{Binding UpdateBadge}"
+                                           Foreground="{DynamicResource {x:Static vsui:EnvironmentColors.AccentMediumBrushKey}}"
                                            Style="{StaticResource VersionBadgeStyle}"
                                            Visibility="{Binding HasUpdate, Converter={StaticResource BoolToVis}}" />
                                 <TextBlock Text="{Binding AuthorDisplay}"
                                            Style="{StaticResource MutedTextStyle}" Margin="8,0,0,0" />
                             </StackPanel>
 
-                            <!-- Source badge + action button -->
-                            <StackPanel Grid.Column="2" Grid.RowSpan="2" Orientation="Vertical"
-                                        VerticalAlignment="Center" Margin="4,0,2,0">
-                                <TextBlock Text="{Binding SourceBadge}"
-                                           Style="{StaticResource MutedTextStyle}"
-                                           HorizontalAlignment="Right" Margin="0,0,0,2" />
-                                <Button Content="Update"
+                            <!-- Quick action: install (when not installed) or update (when update available).
+                                 Only visible when the row is hovered or selected. -->
+                            <StackPanel Grid.Column="2" Grid.RowSpan="2" Orientation="Horizontal"
+                                        VerticalAlignment="Center" Margin="4,0,4,0">
+                                <StackPanel.Style>
+                                    <Style TargetType="StackPanel">
+                                        <Setter Property="Visibility" Value="Hidden" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding IsKeyboardFocusWithin, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </StackPanel.Style>
+                                <Button Style="{StaticResource IconButtonStyle}"
+                                        Command="{Binding DataContext.QuickInstallCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                        CommandParameter="{Binding}"
+                                        ToolTip="Install latest version"
+                                        Visibility="{Binding CanQuickInstall, Converter={StaticResource BoolToVis}}"
+                                        AutomationProperties.Name="{Binding InstallButtonAccessibleName}">
+                                    <imaging:CrispImage Width="16" Height="16"
+                                                        Moniker="{x:Static catalog:KnownMonikers.CloudDownload}" />
+                                </Button>
+                                <Button Style="{StaticResource IconButtonStyle}"
                                         Command="{Binding DataContext.QuickUpdateCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
                                         CommandParameter="{Binding}"
-                                        Padding="6,2" FontSize="11"
+                                        ToolTip="Update to latest version"
                                         Visibility="{Binding HasUpdate, Converter={StaticResource BoolToVis}}"
-                                        AutomationProperties.Name="{Binding UpdateButtonAccessibleName}" />
+                                        AutomationProperties.Name="{Binding UpdateButtonAccessibleName}">
+                                    <imaging:CrispImage Width="16" Height="16"
+                                                        Moniker="{x:Static catalog:KnownMonikers.StatusUpdateAvailable}" />
+                                </Button>
                             </StackPanel>
                         </Grid>
                     </DataTemplate>
@@ -172,13 +369,14 @@
         </Grid>
 
         <!-- Splitter between list and detail -->
-        <GridSplitter Grid.Row="2" Height="4" HorizontalAlignment="Stretch"
-                      Background="{DynamicResource {x:Static SystemColors.ControlBrushKey}}"
+        <GridSplitter Grid.Row="1" Height="4" HorizontalAlignment="Stretch"
+                      Background="{DynamicResource {x:Static vsshell:VsBrushes.CommandBarBorderKey}}"
                       ShowsPreview="True" />
 
         <!-- F: Detail pane -->
-        <Border Grid.Row="3" BorderThickness="0,1,0,1"
-                BorderBrush="{DynamicResource {x:Static SystemColors.ControlDarkBrushKey}}"
+        <Border Grid.Row="2" BorderThickness="0,1,0,1"
+                BorderBrush="{DynamicResource {x:Static vsshell:VsBrushes.CommandBarBorderKey}}"
+                Background="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowBackgroundKey}}"
                 Visibility="{Binding HasSelectedPackage, Converter={StaticResource BoolToVis}}">
             <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="8,6">
                 <StackPanel>
@@ -290,12 +488,14 @@
         </Border>
 
         <!-- G: Status bar -->
-        <Border Grid.Row="4" BorderThickness="0,1,0,0"
-                BorderBrush="{DynamicResource {x:Static SystemColors.ControlDarkBrushKey}}"
+        <Border Grid.Row="3" BorderThickness="0,1,0,0"
+                BorderBrush="{DynamicResource {x:Static vsshell:VsBrushes.CommandBarBorderKey}}"
+                Background="{DynamicResource {x:Static vsui:EnvironmentColors.StatusBarDefaultBrushKey}}"
                 Padding="6,3">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
@@ -304,63 +504,32 @@
                            TextTrimming="CharacterEllipsis"
                            VerticalAlignment="Center"
                            FontSize="11"
-                           Foreground="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"
+                           Foreground="{DynamicResource {x:Static vsui:EnvironmentColors.StatusBarDefaultTextBrushKey}}"
                            AutomationProperties.LiveSetting="Polite" />
-                <Button Grid.Column="1" Content="View log"
+                <CheckBox Grid.Column="1"
+                          IsChecked="{Binding FilterPrerelease}"
+                          Content="Include prerelease"
+                          VerticalAlignment="Center"
+                          Margin="4,0,8,0"
+                          FontSize="11"
+                          Foreground="{DynamicResource {x:Static vsui:EnvironmentColors.StatusBarDefaultTextBrushKey}}"
+                          AutomationProperties.Name="Include prerelease versions" />
+                <Button Grid.Column="2" Content="View log"
                         Command="{Binding ToggleLogCommand}"
-                        Style="{StaticResource {x:Static ToolBar.ButtonStyleKey}}"
+                        Padding="8,2"
                         Margin="4,0"
                         AutomationProperties.Name="View operation log" />
-                <Button Grid.Column="2" Content="&#x21BB; Refresh"
+                <Button Grid.Column="3" Content="&#x21BB; Refresh"
                         Command="{Binding RefreshCommand}"
-                        Style="{StaticResource {x:Static ToolBar.ButtonStyleKey}}"
+                        Padding="8,2"
                         AutomationProperties.Name="Refresh package list" />
             </Grid>
         </Border>
 
-        <!-- H: Source panel (collapsed by default) -->
-        <Border Grid.Row="5" BorderThickness="0,1,0,0"
-                BorderBrush="{DynamicResource {x:Static SystemColors.ControlDarkBrushKey}}"
-                Padding="6,4"
-                Visibility="{Binding IsSourcePanelOpen, Converter={StaticResource BoolToVis}}">
-            <StackPanel>
-                <TextBlock Text="Package Sources" FontWeight="SemiBold" FontSize="11" Margin="0,0,0,4" />
-                <ItemsControl ItemsSource="{Binding PackageSources}">
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate>
-                            <Grid Margin="0,2">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <CheckBox Grid.Column="0" IsChecked="{Binding IsEnabled}"
-                                          VerticalAlignment="Center" />
-                                <StackPanel Grid.Column="1" Margin="4,0">
-                                    <TextBlock Text="{Binding Name}" FontSize="11" />
-                                    <TextBlock Text="{Binding ErrorMessage}" FontSize="10"
-                                               Foreground="OrangeRed"
-                                               Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}"
-                                               TextWrapping="Wrap" />
-                                </StackPanel>
-                                <TextBlock Grid.Column="2" Text="&#x26A0;"
-                                           Foreground="OrangeRed" VerticalAlignment="Center"
-                                           Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}"
-                                           ToolTip="{Binding ErrorMessage}" />
-                            </Grid>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-                <Button Content="+ Add source" HorizontalAlignment="Left"
-                        Command="{Binding AddSourceCommand}"
-                        Margin="0,4,0,0" Padding="6,2" FontSize="11"
-                        AutomationProperties.Name="Add package source" />
-            </StackPanel>
-        </Border>
-
-        <!-- I: Operation log panel (toggled by status-bar "View log" button) -->
-        <Border Grid.Row="6" BorderThickness="0,1,0,0"
-                BorderBrush="{DynamicResource {x:Static SystemColors.ControlDarkBrushKey}}"
+        <!-- H: Operation log panel (toggled by status-bar "View log" button) -->
+        <Border Grid.Row="4" BorderThickness="0,1,0,0"
+                BorderBrush="{DynamicResource {x:Static vsshell:VsBrushes.CommandBarBorderKey}}"
+                Background="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowBackgroundKey}}"
                 Padding="6,4"
                 MaxHeight="180"
                 Visibility="{Binding IsLogOpen, Converter={StaticResource BoolToVis}}">
@@ -377,7 +546,7 @@
                     <Button Grid.Column="1"
                             Content="Close"
                             Command="{Binding ToggleLogCommand}"
-                            Style="{StaticResource {x:Static ToolBar.ButtonStyleKey}}"
+                            Padding="8,2"
                             FontSize="11"
                             AutomationProperties.Name="Close operation log" />
                 </Grid>

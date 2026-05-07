@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel.Design;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -31,16 +32,80 @@ namespace NuGetManagerSlim.ToolWindows
             await viewModel.InitializeAsync(cancellationToken);
 
             Pane.CurrentViewModel = viewModel;
+
+            viewModel.PropertyChanged += (s, e) =>
+            {
+                if (e.PropertyName == nameof(MainViewModel.CurrentProject))
+                {
+                    var project = viewModel.CurrentProject;
+                    if (Pane.Instance != null)
+                    {
+                        Pane.Instance.Caption = project == null
+                            ? "NuGet Quick Manager"
+                            : $"NuGet Quick Manager - {project.DisplayName}";
+                    }
+                }
+            };
+
+            VS.Events.SolutionEvents.OnAfterCloseSolution += () =>
+            {
+                try
+                {
+                    viewModel.ClearCurrentProject();
+                }
+                catch (Exception ex)
+                {
+                    _ = ex.LogAsync();
+                }
+            };
+
+            VS.Events.SelectionEvents.SelectionChanged += (s, e) =>
+            {
+                _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+                {
+                    try
+                    {
+                        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                        var project = await VS.Solutions.GetActiveProjectAsync();
+                        if (project == null || string.IsNullOrEmpty(project.FullPath)) return;
+                        if (!IsManagedDotNetProject(project.FullPath)) return;
+                        if (string.Equals(viewModel.CurrentProject?.ProjectFullPath, project.FullPath, StringComparison.OrdinalIgnoreCase))
+                            return;
+
+                        var displayName = project.Name;
+                        if (string.IsNullOrEmpty(displayName) || displayName!.IndexOfAny(new[] { '\\', '/' }) >= 0)
+                            displayName = System.IO.Path.GetFileNameWithoutExtension(project.FullPath);
+
+                        await viewModel.SetCurrentProjectAsync(project.FullPath!, displayName);
+                    }
+                    catch (Exception ex)
+                    {
+                        await ex.LogAsync();
+                    }
+                });
+            };
+
             return new NuGetQuickManagerControl(viewModel);
+        }
+
+        private static bool IsManagedDotNetProject(string? fullPath)
+        {
+            if (string.IsNullOrEmpty(fullPath)) return false;
+            var ext = System.IO.Path.GetExtension(fullPath);
+            return string.Equals(ext, ".csproj", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(ext, ".vbproj", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(ext, ".fsproj", StringComparison.OrdinalIgnoreCase);
         }
 
         [Guid("07c4db86-767a-46e3-882f-e2935e2167be")]
         internal class Pane : ToolWindowPane
         {
             internal static MainViewModel? CurrentViewModel { get; set; }
+            internal static Pane? Instance { get; private set; }
 
             public Pane()
             {
+                Instance = this;
                 BitmapImageMoniker = KnownMonikers.NuGet;
 
                 ToolBar = new CommandID(
@@ -50,6 +115,27 @@ namespace NuGetManagerSlim.ToolWindows
             }
 
             public override bool SearchEnabled => true;
+
+            public override IVsEnumWindowSearchFilters SearchFiltersEnum
+            {
+                get
+                {
+                    var filters = new List<IVsWindowSearchFilter>();
+                    var vm = CurrentViewModel;
+                    if (vm != null)
+                    {
+                        foreach (var source in vm.PackageSources)
+                        {
+                            filters.Add(new WindowSearchSimpleFilter(
+                                source.Name,
+                                $"Limit results to the '{source.Name}' source",
+                                "source",
+                                source.Name));
+                        }
+                    }
+                    return new WindowSearchFilterEnumerator(filters);
+                }
+            }
 
             public override void ProvideSearchSettings(IVsUIDataSource pSearchSettings)
             {
@@ -67,6 +153,13 @@ namespace NuGetManagerSlim.ToolWindows
                     pSearchSettings,
                     SearchSettingsDataSource.SearchWatermarkProperty.Name,
                     "Search packages");
+
+                // Let the search control stretch to fill the entire title-bar width
+                // instead of the default 400px right-aligned chrome.
+                Utilities.SetValue(
+                    pSearchSettings,
+                    SearchSettingsDataSource.ControlMaxWidthProperty.Name,
+                    (uint)10000);
             }
 
             public override IVsSearchTask? CreateSearch(uint dwCookie, IVsSearchQuery pSearchQuery, IVsSearchCallback pSearchCallback)

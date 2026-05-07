@@ -59,6 +59,10 @@
 	</ItemGroup>
 
   <ItemGroup>
+	<Reference Include="System.Design" />
+  </ItemGroup>
+
+  <ItemGroup>
 	<PackageReference Include="Community.VisualStudio.Toolkit.17" Version="17.*" ExcludeAssets="Runtime">
 	  <IncludeAssets>compile; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
 	</PackageReference>
@@ -70,6 +74,7 @@
 	  <PrivateAssets>all</PrivateAssets>
 	</PackageReference>
 	<PackageReference Include="NuGet.Protocol" Version="6.*" />
+	<PackageReference Include="NuGet.VisualStudio" Version="6.0.2" ExcludeAssets="runtime" />
 	<PackageReference Include="CommunityToolkit.Mvvm" Version="8.*" />
   </ItemGroup>
 

@@ -13,10 +13,16 @@ namespace NuGetManagerSlim.Services
             bool includePrerelease,
             int skip,
             int take,
+            CancellationToken cancellationToken,
+            IReadOnlyCollection<string>? sourceNameFilter = null);
+
+        Task<PackageModel?> GetPackageMetadataAsync(
+            string packageId,
             CancellationToken cancellationToken);
 
         Task<PackageModel?> GetPackageMetadataAsync(
             string packageId,
+            NuGetVersion version,
             CancellationToken cancellationToken);
 
         Task<IReadOnlyList<NuGetVersion>> GetVersionsAsync(

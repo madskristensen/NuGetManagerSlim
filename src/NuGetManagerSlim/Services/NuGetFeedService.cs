@@ -22,10 +22,16 @@ namespace NuGetManagerSlim.Services
             bool includePrerelease,
             int skip,
             int take,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            IReadOnlyCollection<string>? sourceNameFilter = null)
         {
             var results = new List<PackageModel>();
             var sources = GetEnabledSources();
+            if (sourceNameFilter != null && sourceNameFilter.Count > 0)
+            {
+                var allowed = new HashSet<string>(sourceNameFilter, StringComparer.OrdinalIgnoreCase);
+                sources = sources.Where(s => allowed.Contains(s.Name)).ToList();
+            }
 
             foreach (var source in sources)
             {
@@ -59,6 +65,7 @@ namespace NuGetManagerSlim.Services
                             Authors = result.Authors,
                             DownloadCount = result.DownloadCount ?? 0,
                             SourceName = source.Name,
+                            IconUrl = result.IconUrl?.ToString(),
                         });
                     }
                 }
@@ -118,6 +125,7 @@ namespace NuGetManagerSlim.Services
                         DownloadCount = latest.DownloadCount ?? 0,
                         SourceName = source.Name,
                         ProjectUrl = latest.ProjectUrl?.ToString(),
+                        IconUrl = latest.IconUrl?.ToString(),
                         Dependencies = deps,
                     };
                 }
@@ -125,6 +133,58 @@ namespace NuGetManagerSlim.Services
                 {
                     throw;
                 }
+                catch
+                {
+                    // Try next source
+                }
+            }
+
+            return null;
+        }
+
+        public async Task<PackageModel?> GetPackageMetadataAsync(
+            string packageId,
+            NuGetVersion version,
+            CancellationToken cancellationToken)
+        {
+            var identity = new global::NuGet.Packaging.Core.PackageIdentity(packageId, version);
+            foreach (var source in GetEnabledSources())
+            {
+                try
+                {
+                    var repository = Repository.Factory.GetCoreV3(source.Source);
+                    var resource = await repository.GetResourceAsync<PackageMetadataResource>(cancellationToken);
+                    if (resource == null) continue;
+
+                    var meta = await resource.GetMetadataAsync(identity, _cacheContext, _logger, cancellationToken);
+                    if (meta == null) continue;
+
+                    var deps = meta.DependencySets
+                        .SelectMany(ds => ds.Packages.Select(p => new PackageDependencyInfo
+                        {
+                            PackageId = p.Id,
+                            VersionRange = p.VersionRange?.ToString() ?? "*",
+                            TargetFramework = ds.TargetFramework?.GetShortFolderName() ?? string.Empty,
+                        }))
+                        .ToList();
+
+                    return new PackageModel
+                    {
+                        PackageId = meta.Identity.Id,
+                        LatestStableVersion = meta.Identity.Version.IsPrerelease ? null : meta.Identity.Version,
+                        LatestPrereleaseVersion = meta.Identity.Version,
+                        Description = meta.Description,
+                        Authors = meta.Authors,
+                        LicenseExpression = meta.LicenseMetadata?.License,
+                        LicenseUrl = meta.LicenseUrl?.ToString(),
+                        DownloadCount = meta.DownloadCount ?? 0,
+                        SourceName = source.Name,
+                        ProjectUrl = meta.ProjectUrl?.ToString(),
+                        IconUrl = meta.IconUrl?.ToString(),
+                        Dependencies = deps,
+                    };
+                }
+                catch (OperationCanceledException) { throw; }
                 catch
                 {
                     // Try next source

@@ -8,8 +8,6 @@ namespace NuGetManagerSlim.Services
 {
     public interface IProjectService
     {
-        Task<IReadOnlyList<ProjectScopeModel>> GetProjectsAsync(CancellationToken cancellationToken);
-
         Task<IReadOnlyList<PackageModel>> GetInstalledPackagesAsync(
             ProjectScopeModel scope,
             CancellationToken cancellationToken);

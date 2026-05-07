@@ -15,6 +15,8 @@ namespace NuGetManagerSlim.ViewModels
         private readonly INuGetFeedService _feedService;
         private readonly IProjectService _projectService;
         private readonly Action<string> _reportStatus;
+        private readonly Func<Task>? _onChanged;
+        private string? _projectFullPath;
 
         [ObservableProperty] private string _packageId = string.Empty;
         [ObservableProperty] private string _description = string.Empty;
@@ -34,34 +36,69 @@ namespace NuGetManagerSlim.ViewModels
         public ObservableCollection<ProjectMembershipViewModel> ProjectMemberships { get; } = [];
         public ObservableCollection<PackageDependencyInfo> Dependencies { get; } = [];
 
+        private CancellationTokenSource? _versionMetadataCts;
+        private bool _suppressVersionReload;
+
         public PackageDetailViewModel(
             INuGetFeedService feedService,
             IProjectService projectService,
-            Action<string> reportStatus)
+            Action<string> reportStatus,
+            Func<Task>? onChanged = null)
         {
             _feedService = feedService;
             _projectService = projectService;
             _reportStatus = reportStatus;
+            _onChanged = onChanged;
         }
 
         public async Task LoadAsync(PackageRowViewModel row, ProjectScopeModel scope, bool includePrerelease, CancellationToken cancellationToken)
         {
             PackageId = row.PackageId;
+            _projectFullPath = scope?.ProjectFullPath;
             AvailableVersions.Clear();
             Dependencies.Clear();
             ProjectMemberships.Clear();
 
             // Load versions
             var versions = await _feedService.GetVersionsAsync(row.PackageId, includePrerelease, cancellationToken);
-            foreach (var v in versions)
-                AvailableVersions.Add(v);
-
-            SelectedVersion = row.InstalledVersion ?? (AvailableVersions.Count > 0 ? AvailableVersions[0] : null);
-
-            // Load metadata
-            var metadata = await _feedService.GetPackageMetadataAsync(row.PackageId, cancellationToken);
-            if (metadata != null)
+            _suppressVersionReload = true;
+            try
             {
+                foreach (var v in versions)
+                    AvailableVersions.Add(v);
+
+                SelectedVersion = row.InstalledVersion ?? (AvailableVersions.Count > 0 ? AvailableVersions[0] : null);
+            }
+            finally
+            {
+                _suppressVersionReload = false;
+            }
+
+            await LoadVersionMetadataAsync(SelectedVersion, cancellationToken);
+
+            CanInstall = !row.IsInstalled;
+            CanUpdate = row.HasUpdate;
+            CanUninstall = row.IsInstalled && !row.IsTransitive;
+            CanUpdateAllProjects = false;
+        }
+
+        partial void OnSelectedVersionChanged(NuGetVersion? value)
+        {
+            if (_suppressVersionReload || value == null || string.IsNullOrEmpty(PackageId)) return;
+            _versionMetadataCts?.Cancel();
+            _versionMetadataCts = new CancellationTokenSource();
+            var ct = _versionMetadataCts.Token;
+            _ = LoadVersionMetadataAsync(value, ct);
+        }
+
+        private async Task LoadVersionMetadataAsync(NuGetVersion? version, CancellationToken cancellationToken)
+        {
+            if (version == null) return;
+            try
+            {
+                var metadata = await _feedService.GetPackageMetadataAsync(PackageId, version, cancellationToken);
+                if (metadata == null || cancellationToken.IsCancellationRequested) return;
+
                 Description = metadata.Description ?? string.Empty;
                 Authors = metadata.Authors ?? string.Empty;
                 License = metadata.LicenseExpression ?? (metadata.LicenseUrl != null ? "View license" : "Unknown");
@@ -71,46 +108,76 @@ namespace NuGetManagerSlim.ViewModels
                     ? FormatDownloadCount(metadata.DownloadCount)
                     : "N/A";
 
+                Dependencies.Clear();
                 foreach (var dep in metadata.Dependencies)
                     Dependencies.Add(dep);
             }
-
-            CanInstall = !row.IsInstalled;
-            CanUpdate = row.HasUpdate;
-            CanUninstall = row.IsInstalled && !row.IsTransitive;
-            CanUpdateAllProjects = scope.IsEntireSolution && row.HasUpdate;
+            catch (OperationCanceledException) { }
+            catch (Exception ex)
+            {
+                await ex.LogAsync();
+            }
         }
 
         [RelayCommand]
         private async Task InstallAsync(CancellationToken cancellationToken)
         {
-            if (SelectedVersion == null) return;
-            _reportStatus($"Installing {PackageId} {SelectedVersion}…");
-            // Delegate to project service
-            _reportStatus($"✓ Installed {PackageId} {SelectedVersion}");
+            if (SelectedVersion == null || string.IsNullOrEmpty(_projectFullPath)) return;
+            try
+            {
+                _reportStatus($"Installing {PackageId} {SelectedVersion}\u2026");
+                await _projectService.InstallPackageAsync(_projectFullPath!, PackageId, SelectedVersion, cancellationToken);
+                _reportStatus($"\u2713 Installed {PackageId} {SelectedVersion}");
+                if (_onChanged != null) await _onChanged();
+            }
+            catch (Exception ex)
+            {
+                _reportStatus($"\u2717 Failed to install {PackageId}: {ex.Message}");
+                await ex.LogAsync();
+            }
         }
 
         [RelayCommand]
         private async Task UpdateAsync(CancellationToken cancellationToken)
         {
-            if (SelectedVersion == null) return;
-            _reportStatus($"Updating {PackageId} to {SelectedVersion}…");
-            _reportStatus($"✓ Updated {PackageId} → {SelectedVersion}");
+            if (SelectedVersion == null || string.IsNullOrEmpty(_projectFullPath)) return;
+            try
+            {
+                _reportStatus($"Updating {PackageId} to {SelectedVersion}\u2026");
+                await _projectService.UpdatePackageAsync(_projectFullPath!, PackageId, SelectedVersion, cancellationToken);
+                _reportStatus($"\u2713 Updated {PackageId} \u2192 {SelectedVersion}");
+                if (_onChanged != null) await _onChanged();
+            }
+            catch (Exception ex)
+            {
+                _reportStatus($"\u2717 Failed to update {PackageId}: {ex.Message}");
+                await ex.LogAsync();
+            }
         }
 
         [RelayCommand]
         private async Task UninstallAsync(CancellationToken cancellationToken)
         {
-            _reportStatus($"Uninstalling {PackageId}…");
-            _reportStatus($"✓ Uninstalled {PackageId}");
+            if (string.IsNullOrEmpty(_projectFullPath)) return;
+            try
+            {
+                _reportStatus($"Uninstalling {PackageId}\u2026");
+                await _projectService.UninstallPackageAsync(_projectFullPath!, PackageId, cancellationToken);
+                _reportStatus($"\u2713 Uninstalled {PackageId}");
+                if (_onChanged != null) await _onChanged();
+            }
+            catch (Exception ex)
+            {
+                _reportStatus($"\u2717 Failed to uninstall {PackageId}: {ex.Message}");
+                await ex.LogAsync();
+            }
         }
 
         [RelayCommand]
         private async Task UpdateAllProjectsAsync(CancellationToken cancellationToken)
         {
             if (SelectedVersion == null) return;
-            _reportStatus($"Updating {PackageId} in all projects…");
-            _reportStatus($"✓ Updated {PackageId} → {SelectedVersion} in all projects");
+            await Task.CompletedTask;
         }
 
         [RelayCommand]

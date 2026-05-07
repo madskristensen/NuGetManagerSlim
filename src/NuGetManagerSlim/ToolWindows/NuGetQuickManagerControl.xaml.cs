@@ -1,3 +1,4 @@
+using System.Windows;
 using System.Windows.Controls;
 using NuGetManagerSlim.ViewModels;
 
@@ -18,6 +19,14 @@ namespace NuGetManagerSlim.ToolWindows
         {
             if (PackageListBox.SelectedItem != null)
                 PackageListBox.ScrollIntoView(PackageListBox.SelectedItem);
+        }
+
+        private void PackageIcon_ImageFailed(object sender, ExceptionRoutedEventArgs e)
+        {
+            if (sender is Image image)
+            {
+                image.Visibility = Visibility.Collapsed;
+            }
         }
     }
 }

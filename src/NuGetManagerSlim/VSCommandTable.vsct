@@ -15,58 +15,58 @@
 					<CommandName>NuGet Quick Manager Toolbar</CommandName>
 				</Strings>
 			</Menu>
+			<Menu guid="NuGetManagerSlim" id="ViewModeMenuController" priority="0x0150" type="MenuController">
+				<Parent guid="NuGetManagerSlim" id="NuGetQuickManagerToolbarGroup" />
+				<Strings>
+					<ButtonText>Browse</ButtonText>
+					<CommandName>View mode</CommandName>
+				</Strings>
+			</Menu>
 		</Menus>
 
 		<Groups>
-			<Group guid="NuGetManagerSlim" id="NuGetQuickManagerToolbarGroup" priority="0x0000">
+			<Group guid="NuGetManagerSlim" id="NuGetQuickManagerToolbarGroup" priority="0x0200">
 				<Parent guid="NuGetManagerSlim" id="NuGetQuickManagerToolbar" />
+			</Group>
+			<Group guid="NuGetManagerSlim" id="ViewModeMenuGroup" priority="0x0000">
+				<Parent guid="NuGetManagerSlim" id="ViewModeMenuController" />
 			</Group>
 			<Group guid="NuGetManagerSlim" id="NuGetQuickManagerToolbarRefreshGroup" priority="0x0100">
 				<Parent guid="NuGetManagerSlim" id="NuGetQuickManagerToolbar" />
 			</Group>
+			<Group guid="NuGetManagerSlim" id="ProjectContextGroup" priority="0x0600">
+				<Parent guid="guidSHLMainMenu" id="IDM_VS_CTXT_PROJNODE" />
+			</Group>
 		</Groups>
 
 		<Buttons>
-			<Button guid="NuGetManagerSlim" id="OpenNuGetQuickManagerCommand" priority="0x0100" type="Button">
-				<Parent guid="VSMainMenu" id="View.DefineViewsGroup" />
+			<Button guid="NuGetManagerSlim" id="ViewModeBrowseCommand" priority="0x0100" type="Button">
+				<Parent guid="NuGetManagerSlim" id="ViewModeMenuGroup" />
 				<Icon guid="ImageCatalogGuid" id="NuGet" />
 				<CommandFlag>IconIsMoniker</CommandFlag>
 				<Strings>
-					<ButtonText>NuGet Quick Manager</ButtonText>
-					<ToolTipText>Open NuGet Quick Manager</ToolTipText>
+					<ButtonText>Online</ButtonText>
+					<ToolTipText>Browse online packages from your enabled sources</ToolTipText>
 				</Strings>
 			</Button>
 
-			<Button guid="NuGetManagerSlim" id="FilterInstalledCommand" priority="0x0100" type="Button">
-				<Parent guid="NuGetManagerSlim" id="NuGetQuickManagerToolbarGroup" />
+			<Button guid="NuGetManagerSlim" id="ViewModeInstalledCommand" priority="0x0200" type="Button">
+				<Parent guid="NuGetManagerSlim" id="ViewModeMenuGroup" />
 				<Icon guid="ImageCatalogGuid" id="StatusOK" />
 				<CommandFlag>IconIsMoniker</CommandFlag>
-				<CommandFlag>TextChanges</CommandFlag>
 				<Strings>
 					<ButtonText>Installed</ButtonText>
 					<ToolTipText>Show only installed packages</ToolTipText>
 				</Strings>
 			</Button>
 
-			<Button guid="NuGetManagerSlim" id="FilterUpdatesCommand" priority="0x0200" type="Button">
-				<Parent guid="NuGetManagerSlim" id="NuGetQuickManagerToolbarGroup" />
-				<Icon guid="ImageCatalogGuid" id="Download" />
+			<Button guid="NuGetManagerSlim" id="ViewModeUpdatesCommand" priority="0x0300" type="Button">
+				<Parent guid="NuGetManagerSlim" id="ViewModeMenuGroup" />
+				<Icon guid="ImageCatalogGuid" id="Upload" />
 				<CommandFlag>IconIsMoniker</CommandFlag>
-				<CommandFlag>TextChanges</CommandFlag>
 				<Strings>
-					<ButtonText>Updates</ButtonText>
-					<ToolTipText>Show only packages with available updates</ToolTipText>
-				</Strings>
-			</Button>
-
-			<Button guid="NuGetManagerSlim" id="FilterPrereleaseCommand" priority="0x0300" type="Button">
-				<Parent guid="NuGetManagerSlim" id="NuGetQuickManagerToolbarGroup" />
-				<Icon guid="ImageCatalogGuid" id="StatusInformation" />
-				<CommandFlag>IconIsMoniker</CommandFlag>
-				<CommandFlag>TextChanges</CommandFlag>
-				<Strings>
-					<ButtonText>Prerelease</ButtonText>
-					<ToolTipText>Include prerelease versions</ToolTipText>
+					<ButtonText>Updates available</ButtonText>
+					<ToolTipText>Show only installed packages with available updates</ToolTipText>
 				</Strings>
 			</Button>
 
@@ -79,6 +79,17 @@
 					<ToolTipText>Refresh the package list</ToolTipText>
 				</Strings>
 			</Button>
+
+			<Button guid="NuGetManagerSlim" id="OpenForProjectCommand" priority="0x0100" type="Button">
+				<Parent guid="NuGetManagerSlim" id="ProjectContextGroup" />
+				<Icon guid="ImageCatalogGuid" id="NuGet" />
+				<CommandFlag>IconIsMoniker</CommandFlag>
+				<CommandFlag>DynamicVisibility</CommandFlag>
+				<Strings>
+					<ButtonText>Manage NuGet Packages (Quick Manager)...</ButtonText>
+					<ToolTipText>Open the NuGet Quick Manager scoped to this project</ToolTipText>
+				</Strings>
+			</Button>
 		</Buttons>
 
 	</Commands>
@@ -86,16 +97,20 @@
 	<Symbols>
 		<GuidSymbol name="NuGetManagerSlim" value="{f6649f79-8c76-4df8-ae04-370c692ed6ed}">
 			<IDSymbol name="NuGetQuickManagerGroup"               value="0x1020" />
-			<IDSymbol name="OpenNuGetQuickManagerCommand"         value="0x0101" />
 
 			<IDSymbol name="NuGetQuickManagerToolbar"             value="0x1100" />
 			<IDSymbol name="NuGetQuickManagerToolbarGroup"        value="0x1101" />
 			<IDSymbol name="NuGetQuickManagerToolbarRefreshGroup" value="0x1102" />
+			<IDSymbol name="ViewModeMenuController"               value="0x1104" />
+			<IDSymbol name="ViewModeMenuGroup"                    value="0x1105" />
 
-			<IDSymbol name="FilterInstalledCommand"               value="0x0200" />
-			<IDSymbol name="FilterUpdatesCommand"                 value="0x0201" />
-			<IDSymbol name="FilterPrereleaseCommand"              value="0x0202" />
+			<IDSymbol name="ViewModeBrowseCommand"                value="0x0210" />
+			<IDSymbol name="ViewModeInstalledCommand"             value="0x0211" />
+			<IDSymbol name="ViewModeUpdatesCommand"               value="0x0212" />
 			<IDSymbol name="RefreshCommand"                       value="0x0203" />
+			<IDSymbol name="OpenForProjectCommand"                value="0x0204" />
+
+			<IDSymbol name="ProjectContextGroup"                  value="0x1200" />
 		</GuidSymbol>
 	</Symbols>
 

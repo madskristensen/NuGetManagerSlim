@@ -12,6 +12,13 @@ using NuGetManagerSlim.Services;
 
 namespace NuGetManagerSlim.ViewModels
 {
+    public enum PackageViewMode
+    {
+        Browse,
+        Installed,
+        Updates,
+    }
+
     public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         private readonly IProjectService _projectService;
@@ -26,8 +33,8 @@ namespace NuGetManagerSlim.ViewModels
         private readonly SynchronizationContext? _uiContext = SynchronizationContext.Current;
 
         [ObservableProperty] private string _searchText = string.Empty;
-        [ObservableProperty] private ProjectScopeModel? _selectedScope;
-        [ObservableProperty] private bool _filterInstalled;
+        [ObservableProperty] private ProjectScopeModel? _currentProject;
+        [ObservableProperty] private bool _filterInstalled = true;
         [ObservableProperty] private bool _filterUpdates;
         [ObservableProperty] private bool _filterPrerelease;
         [ObservableProperty] private bool _isLoading;
@@ -35,11 +42,10 @@ namespace NuGetManagerSlim.ViewModels
         [ObservableProperty] private bool _isSourcePanelOpen;
         [ObservableProperty] private bool _isLogOpen;
         [ObservableProperty] private string _statusMessage = "Ready";
-        [ObservableProperty] private string _emptyStateMessage = "Search for a package to get started, or toggle Installed to see what's in your project.";
+        [ObservableProperty] private string _emptyStateMessage = "Open a project context menu and pick 'Manage NuGet Packages' to get started.";
         [ObservableProperty] private PackageRowViewModel? _selectedPackage;
         [ObservableProperty] private PackageDetailViewModel? _detail;
 
-        public ObservableCollection<ProjectScopeModel> ProjectScopes { get; } = [];
         public ObservableCollection<PackageRowViewModel> Packages { get; } = [];
         public ObservableCollection<PackageSourceModel> PackageSources { get; } = [];
         public ObservableCollection<string> OperationLog { get; } = [];
@@ -47,6 +53,23 @@ namespace NuGetManagerSlim.ViewModels
         public bool HasPackages => Packages.Count > 0;
         public bool IsEmptyState => !IsLoading && Packages.Count == 0;
         public bool HasSelectedPackage => SelectedPackage != null;
+        public bool HasProject => CurrentProject != null;
+
+        public PackageViewMode ViewMode
+        {
+            get
+            {
+                if (FilterUpdates) return PackageViewMode.Updates;
+                if (FilterInstalled) return PackageViewMode.Installed;
+                return PackageViewMode.Browse;
+            }
+            set
+            {
+                FilterUpdates = value == PackageViewMode.Updates;
+                FilterInstalled = value == PackageViewMode.Installed || value == PackageViewMode.Updates;
+                OnPropertyChanged();
+            }
+        }
 
         public MainViewModel(
             IProjectService projectService,
@@ -68,13 +91,6 @@ namespace NuGetManagerSlim.ViewModels
             IsLoading = true;
             try
             {
-                var projects = await _projectService.GetProjectsAsync(cancellationToken);
-                ProjectScopes.Clear();
-                foreach (var p in projects)
-                    ProjectScopes.Add(p);
-
-                SelectedScope = ProjectScopes.Count > 0 ? ProjectScopes[0] : null;
-
                 var sources = await _feedService.GetSourcesAsync(cancellationToken);
                 PackageSources.Clear();
                 foreach (var s in sources)
@@ -87,24 +103,54 @@ namespace NuGetManagerSlim.ViewModels
             }
         }
 
+        public async Task SetCurrentProjectAsync(string projectFullPath, string projectDisplayName, CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrEmpty(projectFullPath)) return;
+            CurrentProject = new ProjectScopeModel
+            {
+                DisplayName = projectDisplayName,
+                ProjectFullPath = projectFullPath,
+            };
+            await ReloadPackagesAsync();
+        }
+
+        public void ClearCurrentProject()
+        {
+            CurrentProject = null;
+            Packages.Clear();
+            Detail = null;
+            SelectedPackage = null;
+            UpdateEmptyState();
+            OnPropertyChanged(nameof(HasPackages));
+            OnPropertyChanged(nameof(IsEmptyState));
+        }
+
         partial void OnSearchTextChanged(string value)
         {
             _debounceTimer?.Stop();
             _debounceTimer?.Start();
         }
 
-        partial void OnFilterInstalledChanged(bool value) => _ = ApplyFiltersAsync();
-        partial void OnFilterUpdatesChanged(bool value) => _ = ApplyFiltersAsync();
+        partial void OnFilterInstalledChanged(bool value)
+        {
+            OnPropertyChanged(nameof(ViewMode));
+            _ = ApplyFiltersAsync();
+        }
+        partial void OnFilterUpdatesChanged(bool value)
+        {
+            OnPropertyChanged(nameof(ViewMode));
+            _ = ApplyFiltersAsync();
+        }
         partial void OnFilterPrereleaseChanged(bool value) => _ = ApplyFiltersAsync();
 
-        partial void OnSelectedScopeChanged(ProjectScopeModel? value)
+        partial void OnCurrentProjectChanged(ProjectScopeModel? value)
         {
+            _restoreMonitor.StopMonitoring();
             if (value != null)
             {
-                _restoreMonitor.StopMonitoring();
                 _restoreMonitor.StartMonitoring(value);
             }
-            _ = ApplyFiltersAsync();
+            OnPropertyChanged(nameof(HasProject));
         }
 
         partial void OnSelectedPackageChanged(PackageRowViewModel? value)
@@ -146,8 +192,10 @@ namespace NuGetManagerSlim.ViewModels
             _searchCts = new CancellationTokenSource();
             var ct = _searchCts.Token;
 
-            if (!string.IsNullOrWhiteSpace(query))
-                AddToSearchHistory(query);
+            var (cleanQuery, sourceFilter) = ExtractSourceFilter(query);
+
+            if (!string.IsNullOrWhiteSpace(cleanQuery))
+                AddToSearchHistory(cleanQuery);
 
             try
             {
@@ -155,7 +203,7 @@ namespace NuGetManagerSlim.ViewModels
                 {
                     // Browse / remote search mode
                     IsRemoteLoading = true;
-                    var results = await _feedService.SearchAsync(query, FilterPrerelease, 0, 50, ct);
+                    var results = await _feedService.SearchAsync(cleanQuery, FilterPrerelease, 0, 50, ct, sourceFilter);
                     ct.ThrowIfCancellationRequested();
                     ApplyRemoteResults(results);
                 }
@@ -179,18 +227,47 @@ namespace NuGetManagerSlim.ViewModels
             }
         }
 
+        // Parses `source:"<name>"` and `source:<name>" tokens that the IVsSearch
+        // filter dropdown injects when the user picks one or more package sources.
+        // Returns the query with the tokens stripped, and the list of source names.
+        public static (string cleanQuery, IReadOnlyCollection<string>? sourceFilter) ExtractSourceFilter(string query)
+        {
+            if (string.IsNullOrEmpty(query))
+                return (query ?? string.Empty, null);
+
+            var sources = new List<string>();
+            var pattern = new System.Text.RegularExpressions.Regex(
+                "source:(?:\"(?<v>[^\"]*)\"|(?<v>\\S+))",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+            var stripped = pattern.Replace(query, m =>
+            {
+                var value = m.Groups["v"].Value;
+                if (!string.IsNullOrWhiteSpace(value))
+                    sources.Add(value);
+                return string.Empty;
+            });
+
+            stripped = System.Text.RegularExpressions.Regex.Replace(stripped, "\\s+", " ").Trim();
+            return (stripped, sources.Count == 0 ? null : sources);
+        }
+
         private async Task ApplyFiltersAsync(CancellationToken cancellationToken = default)
         {
-            if (SelectedScope == null) return;
+            if (CurrentProject == null) return;
 
             IsLoading = true;
             try
             {
-                var installed = await _projectService.GetInstalledPackagesAsync(SelectedScope, cancellationToken);
+                var installed = await _projectService.GetInstalledPackagesAsync(CurrentProject, cancellationToken);
                 var rows = installed.Select(p => new PackageRowViewModel(p)).ToList();
 
                 if (!string.IsNullOrWhiteSpace(SearchText))
-                    rows = rows.Where(r => r.PackageId.Contains(SearchText, StringComparison.OrdinalIgnoreCase)).ToList();
+                {
+                    var (cleanQuery, _) = ExtractSourceFilter(SearchText);
+                    if (!string.IsNullOrWhiteSpace(cleanQuery))
+                        rows = rows.Where(r => r.PackageId.Contains(cleanQuery, StringComparison.OrdinalIgnoreCase)).ToList();
+                }
 
                 if (FilterUpdates)
                     rows = rows.Where(r => r.HasUpdate).ToList();
@@ -198,6 +275,8 @@ namespace NuGetManagerSlim.ViewModels
                 Packages.Clear();
                 foreach (var row in rows.OrderBy(r => r.IsTransitive).ThenBy(r => r.PackageId))
                     Packages.Add(row);
+
+                EnrichInstalledMetadataInBackground(Packages.ToList());
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
@@ -210,7 +289,48 @@ namespace NuGetManagerSlim.ViewModels
                 IsLoading = false;
                 OnPropertyChanged(nameof(HasPackages));
                 OnPropertyChanged(nameof(IsEmptyState));
+                UpdateEmptyState();
             }
+        }
+
+        private CancellationTokenSource? _enrichCts;
+
+        private void EnrichInstalledMetadataInBackground(IReadOnlyList<PackageRowViewModel> rows)
+        {
+            _enrichCts?.Cancel();
+            _enrichCts = new CancellationTokenSource();
+            var ct = _enrichCts.Token;
+            var ctx = _uiContext;
+
+            _ = Task.Run(async () =>
+            {
+                using var throttle = new SemaphoreSlim(4);
+                var tasks = rows.Select(async row =>
+                {
+                    if (ct.IsCancellationRequested) return;
+                    await throttle.WaitAsync(ct).ConfigureAwait(false);
+                    try
+                    {
+                        var meta = await _feedService.GetPackageMetadataAsync(row.PackageId, ct).ConfigureAwait(false);
+                        if (meta == null || ct.IsCancellationRequested) return;
+                        if (ctx != null)
+                        {
+#pragma warning disable VSTHRD001
+                            ctx.Post(_ => row.ApplyMetadata(meta), null);
+#pragma warning restore VSTHRD001
+                        }
+                        else
+                        {
+                            row.ApplyMetadata(meta);
+                        }
+                    }
+                    catch (OperationCanceledException) { }
+                    catch (Exception ex) { await ex.LogAsync(); }
+                    finally { throttle.Release(); }
+                });
+                try { await Task.WhenAll(tasks).ConfigureAwait(false); }
+                catch (OperationCanceledException) { }
+            }, ct);
         }
 
         private void ApplyRemoteResults(IReadOnlyList<PackageModel> results)
@@ -233,11 +353,12 @@ namespace NuGetManagerSlim.ViewModels
             {
                 StatusMessage = msg;
                 OperationLog.Add($"[{DateTime.Now:HH:mm:ss}] {msg}");
-            });
+            }, async () => await ReloadPackagesAsync());
 
             try
             {
-                await detail.LoadAsync(row, SelectedScope ?? ProjectScopeModel.EntireSolution, FilterPrerelease, _operationCts.Token);
+                if (CurrentProject == null) return;
+                await detail.LoadAsync(row, CurrentProject, FilterPrerelease, _operationCts.Token);
                 Detail = detail;
             }
             catch (OperationCanceledException) { }
@@ -258,9 +379,17 @@ namespace NuGetManagerSlim.ViewModels
         [RelayCommand]
         private async Task RefreshAsync()
         {
-            SearchText = string.Empty;
             OperationLog.Clear();
-            await InitializeAsync(CancellationToken.None);
+            await ReloadPackagesAsync();
+        }
+
+        public async Task ReloadPackagesAsync()
+        {
+            // Re-load packages using the current scope, view-mode and search.
+            if (FilterInstalled || FilterUpdates)
+                await ApplyFiltersAsync();
+            else
+                await SearchRemoteAsync();
         }
 
         [RelayCommand]
@@ -284,14 +413,43 @@ namespace NuGetManagerSlim.ViewModels
             try
             {
                 StatusMessage = $"Updating {row.PackageId}…";
-                if (SelectedScope?.ProjectFullPath != null && row.LatestStableVersion != null)
-                    await _projectService.UpdatePackageAsync(SelectedScope.ProjectFullPath, row.PackageId, row.LatestStableVersion, CancellationToken.None);
+                if (CurrentProject?.ProjectFullPath != null && row.LatestStableVersion != null)
+                    await _projectService.UpdatePackageAsync(CurrentProject.ProjectFullPath, row.PackageId, row.LatestStableVersion, CancellationToken.None);
                 StatusMessage = $"✓ Updated {row.PackageId} → {row.LatestStableVersion}";
                 OperationLog.Add($"[{DateTime.Now:HH:mm:ss}] ✓ Updated {row.PackageId} → {row.LatestStableVersion}");
             }
             catch (Exception ex)
             {
                 StatusMessage = $"✗ Failed to update {row.PackageId}: {ex.Message}";
+                await ex.LogAsync();
+            }
+            finally
+            {
+                row.IsOperationInProgress = false;
+            }
+        }
+
+        [RelayCommand]
+        private async Task QuickInstallAsync(PackageRowViewModel? row)
+        {
+            if (row == null) return;
+            var version = row.LatestStableVersion ?? row.LatestPrereleaseVersion;
+            if (version == null) return;
+
+            row.IsOperationInProgress = true;
+            try
+            {
+                StatusMessage = $"Installing {row.PackageId}…";
+                if (CurrentProject?.ProjectFullPath != null)
+                {
+                    await _projectService.InstallPackageAsync(CurrentProject.ProjectFullPath, row.PackageId, version, CancellationToken.None);
+                }
+                StatusMessage = $"✓ Installed {row.PackageId} {version}";
+                OperationLog.Add($"[{DateTime.Now:HH:mm:ss}] ✓ Installed {row.PackageId} {version}");
+            }
+            catch (Exception ex)
+            {
+                StatusMessage = $"✗ Failed to install {row.PackageId}: {ex.Message}";
                 await ex.LogAsync();
             }
             finally
@@ -319,9 +477,9 @@ namespace NuGetManagerSlim.ViewModels
 
         private void UpdateEmptyState()
         {
-            if (SelectedScope == null)
+            if (CurrentProject == null)
             {
-                EmptyStateMessage = "Open a solution to manage NuGet packages.";
+                EmptyStateMessage = "Open a project context menu and pick 'Manage NuGet Packages' to manage packages for that project.";
                 return;
             }
             if (!FilterInstalled && !FilterUpdates && string.IsNullOrWhiteSpace(SearchText))
@@ -331,7 +489,7 @@ namespace NuGetManagerSlim.ViewModels
             }
             if (FilterUpdates && Packages.Count == 0)
             {
-                EmptyStateMessage = $"All packages in {SelectedScope.DisplayName} are up to date. ✓";
+                EmptyStateMessage = $"All packages in {CurrentProject.DisplayName} are up to date. \u2713";
                 return;
             }
             if (!string.IsNullOrWhiteSpace(SearchText) && Packages.Count == 0)
@@ -354,6 +512,8 @@ namespace NuGetManagerSlim.ViewModels
             _searchCts?.Dispose();
             _operationCts?.Cancel();
             _operationCts?.Dispose();
+            _enrichCts?.Cancel();
+            _enrichCts?.Dispose();
             _debounceTimer?.Dispose();
             _debounceTimer = null;
             _restoreMonitor.RestoreStatusChanged -= OnRestoreStatusChanged;

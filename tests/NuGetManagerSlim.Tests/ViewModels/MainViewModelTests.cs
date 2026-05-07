@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Moq;
@@ -13,15 +14,11 @@ namespace NuGetManagerSlim.Tests.ViewModels
     {
         private static (MainViewModel vm, Mock<IProjectService> proj, Mock<INuGetFeedService> feed, Mock<IRestoreMonitorService> restore)
             CreateViewModel(
-                IReadOnlyList<ProjectScopeModel>? projects = null,
                 IReadOnlyList<PackageSourceModel>? sources = null)
         {
             var projMock = new Mock<IProjectService>();
             var feedMock = new Mock<INuGetFeedService>();
             var restoreMock = new Mock<IRestoreMonitorService>();
-
-            projMock.Setup(p => p.GetProjectsAsync(It.IsAny<CancellationToken>()))
-                .ReturnsAsync(projects ?? new List<ProjectScopeModel> { ProjectScopeModel.EntireSolution });
 
             feedMock.Setup(f => f.GetSourcesAsync(It.IsAny<CancellationToken>()))
                 .ReturnsAsync(sources ?? new List<PackageSourceModel>());
@@ -37,30 +34,41 @@ namespace NuGetManagerSlim.Tests.ViewModels
         }
 
         [Fact]
-        public async Task InitializeAsync_PopulatesProjectScopes()
-        {
-            var projects = new List<ProjectScopeModel>
-            {
-                ProjectScopeModel.EntireSolution,
-                new() { DisplayName = "MyApp", ProjectFullPath = @"C:\MyApp\MyApp.csproj" },
-            };
-            var (vm, _, _, _) = CreateViewModel(projects: projects);
-
-            await vm.InitializeAsync(CancellationToken.None);
-
-            Assert.Equal(2, vm.ProjectScopes.Count);
-            Assert.Equal("Entire Solution", vm.ProjectScopes[0].DisplayName);
-            Assert.Equal("MyApp", vm.ProjectScopes[1].DisplayName);
-        }
-
-        [Fact]
-        public async Task InitializeAsync_SetsSelectedScopeToFirstProject()
+        public async Task InitializeAsync_DoesNotSetCurrentProject()
         {
             var (vm, _, _, _) = CreateViewModel();
             await vm.InitializeAsync(CancellationToken.None);
 
-            Assert.NotNull(vm.SelectedScope);
-            Assert.Equal("Entire Solution", vm.SelectedScope.DisplayName);
+            Assert.Null(vm.CurrentProject);
+            Assert.False(vm.HasProject);
+        }
+
+        [Fact]
+        public async Task SetCurrentProjectAsync_SetsCurrentProjectAndHasProject()
+        {
+            var (vm, _, _, _) = CreateViewModel();
+            await vm.InitializeAsync(CancellationToken.None);
+
+            await vm.SetCurrentProjectAsync(@"C:\MyApp\MyApp.csproj", "MyApp");
+
+            Assert.NotNull(vm.CurrentProject);
+            Assert.Equal("MyApp", vm.CurrentProject!.DisplayName);
+            Assert.Equal(@"C:\MyApp\MyApp.csproj", vm.CurrentProject.ProjectFullPath);
+            Assert.True(vm.HasProject);
+        }
+
+        [Fact]
+        public async Task ClearCurrentProject_ResetsState()
+        {
+            var (vm, _, _, _) = CreateViewModel();
+            await vm.InitializeAsync(CancellationToken.None);
+            await vm.SetCurrentProjectAsync(@"C:\MyApp\MyApp.csproj", "MyApp");
+
+            vm.ClearCurrentProject();
+
+            Assert.Null(vm.CurrentProject);
+            Assert.False(vm.HasProject);
+            Assert.Empty(vm.Packages);
         }
 
         [Fact]
@@ -87,10 +95,11 @@ namespace NuGetManagerSlim.Tests.ViewModels
         }
 
         [Fact]
-        public async Task InitializeAsync_StartsRestoreMonitoring()
+        public async Task SetCurrentProjectAsync_StartsRestoreMonitoring()
         {
             var (vm, _, _, restoreMock) = CreateViewModel();
             await vm.InitializeAsync(CancellationToken.None);
+            await vm.SetCurrentProjectAsync(@"C:\MyApp\MyApp.csproj", "MyApp");
 
             restoreMock.Verify(r => r.StartMonitoring(It.IsAny<ProjectScopeModel>()), Times.Once);
         }
@@ -103,10 +112,10 @@ namespace NuGetManagerSlim.Tests.ViewModels
         }
 
         [Fact]
-        public void FilterInstalled_DefaultIsFalse()
+        public void FilterInstalled_DefaultIsTrue()
         {
             var (vm, _, _, _) = CreateViewModel();
-            Assert.False(vm.FilterInstalled);
+            Assert.True(vm.FilterInstalled);
         }
 
         [Fact]
@@ -124,6 +133,73 @@ namespace NuGetManagerSlim.Tests.ViewModels
         }
 
         [Fact]
+        public void ViewMode_DefaultIsInstalled()
+        {
+            var (vm, _, _, _) = CreateViewModel();
+            Assert.Equal(PackageViewMode.Installed, vm.ViewMode);
+        }
+
+        [Fact]
+        public void ViewMode_SetToInstalled_FlipsFilters()
+        {
+            var (vm, _, _, _) = CreateViewModel();
+            vm.ViewMode = PackageViewMode.Installed;
+            Assert.True(vm.FilterInstalled);
+            Assert.False(vm.FilterUpdates);
+            Assert.Equal(PackageViewMode.Installed, vm.ViewMode);
+        }
+
+        [Fact]
+        public void ViewMode_SetToUpdates_FlipsBothFilters()
+        {
+            var (vm, _, _, _) = CreateViewModel();
+            vm.ViewMode = PackageViewMode.Updates;
+            Assert.True(vm.FilterInstalled);
+            Assert.True(vm.FilterUpdates);
+            Assert.Equal(PackageViewMode.Updates, vm.ViewMode);
+        }
+
+        [Fact]
+        public void ViewMode_SetToBrowse_ClearsFilters()
+        {
+            var (vm, _, _, _) = CreateViewModel();
+            vm.ViewMode = PackageViewMode.Updates;
+            vm.ViewMode = PackageViewMode.Browse;
+            Assert.False(vm.FilterInstalled);
+            Assert.False(vm.FilterUpdates);
+            Assert.Equal(PackageViewMode.Browse, vm.ViewMode);
+        }
+
+        [Fact]
+        public void ExtractSourceFilter_NoToken_ReturnsNullSources()
+        {
+            var (clean, sources) = MainViewModel.ExtractSourceFilter("newtonsoft");
+            Assert.Equal("newtonsoft", clean);
+            Assert.Null(sources);
+        }
+
+        [Fact]
+        public void ExtractSourceFilter_QuotedToken_StripsTokenAndReturnsSource()
+        {
+            var (clean, sources) = MainViewModel.ExtractSourceFilter("newtonsoft source:\"nuget.org\"");
+            Assert.Equal("newtonsoft", clean);
+            Assert.NotNull(sources);
+            Assert.Single(sources);
+            Assert.Equal("nuget.org", sources!.First());
+        }
+
+        [Fact]
+        public void ExtractSourceFilter_MultipleTokens_ReturnsAllSources()
+        {
+            var (clean, sources) = MainViewModel.ExtractSourceFilter("source:\"nuget.org\" json source:internal");
+            Assert.Equal("json", clean);
+            Assert.NotNull(sources);
+            Assert.Equal(2, sources!.Count);
+            Assert.Contains("nuget.org", sources);
+            Assert.Contains("internal", sources);
+        }
+
+        [Fact]
         public void StatusMessage_DefaultIsReady()
         {
             var (vm, _, _, _) = CreateViewModel();
@@ -138,12 +214,12 @@ namespace NuGetManagerSlim.Tests.ViewModels
         }
 
         [Fact]
-        public async Task RefreshCommand_ResetsSearchText()
+        public async Task RefreshCommand_PreservesSearchText()
         {
             var (vm, _, _, _) = CreateViewModel();
             vm.SearchText = "something";
             await vm.RefreshCommand.ExecuteAsync(null);
-            Assert.Equal(string.Empty, vm.SearchText);
+            Assert.Equal("something", vm.SearchText);
         }
 
         [Fact]
@@ -171,18 +247,6 @@ namespace NuGetManagerSlim.Tests.ViewModels
             var (vm, _, _, _) = CreateViewModel();
             var ex = Record.Exception(() => vm.Dispose());
             Assert.Null(ex);
-        }
-
-        [Fact]
-        public async Task InitializeAsync_NoProjects_HasEntireSolutionScope()
-        {
-            var (vm, projMock, _, _) = CreateViewModel();
-            projMock.Setup(p => p.GetProjectsAsync(It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new List<ProjectScopeModel> { ProjectScopeModel.EntireSolution });
-            await vm.InitializeAsync(CancellationToken.None);
-
-            Assert.Single(vm.ProjectScopes);
-            Assert.True(vm.ProjectScopes[0].IsEntireSolution);
         }
     }
 }

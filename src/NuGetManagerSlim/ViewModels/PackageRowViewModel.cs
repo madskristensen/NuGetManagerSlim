@@ -6,7 +6,8 @@ namespace NuGetManagerSlim.ViewModels
 {
     public partial class PackageRowViewModel : ObservableObject
     {
-        private readonly PackageModel _model;
+        private PackageModel _model;
+        private string? _iconUrlOverride;
 
         [ObservableProperty]
         private bool _isOperationInProgress;
@@ -14,6 +15,43 @@ namespace NuGetManagerSlim.ViewModels
         public PackageRowViewModel(PackageModel model)
         {
             _model = model;
+        }
+
+        public void ApplyMetadata(PackageModel metadata)
+        {
+            if (metadata == null) return;
+            if (!string.IsNullOrEmpty(metadata.IconUrl))
+            {
+                _iconUrlOverride = metadata.IconUrl;
+                OnPropertyChanged(nameof(IconUrl));
+                OnPropertyChanged(nameof(HasIcon));
+            }
+            if (string.IsNullOrEmpty(_model.Authors) && !string.IsNullOrEmpty(metadata.Authors))
+            {
+                _model = new PackageModel
+                {
+                    PackageId = _model.PackageId,
+                    InstalledVersion = _model.InstalledVersion,
+                    LatestStableVersion = _model.LatestStableVersion ?? metadata.LatestStableVersion,
+                    LatestPrereleaseVersion = _model.LatestPrereleaseVersion ?? metadata.LatestPrereleaseVersion,
+                    Description = _model.Description ?? metadata.Description,
+                    Authors = metadata.Authors,
+                    LicenseExpression = _model.LicenseExpression ?? metadata.LicenseExpression,
+                    LicenseUrl = _model.LicenseUrl ?? metadata.LicenseUrl,
+                    DownloadCount = _model.DownloadCount > 0 ? _model.DownloadCount : metadata.DownloadCount,
+                    SourceName = _model.SourceName,
+                    IsTransitive = _model.IsTransitive,
+                    RequiredByPackageId = _model.RequiredByPackageId,
+                    ReadmeUrl = _model.ReadmeUrl ?? metadata.ReadmeUrl,
+                    ProjectUrl = _model.ProjectUrl ?? metadata.ProjectUrl,
+                    IconUrl = _iconUrlOverride ?? metadata.IconUrl,
+                    PerFrameworkVersions = _model.PerFrameworkVersions,
+                    Dependencies = _model.Dependencies,
+                };
+                OnPropertyChanged(nameof(AuthorDisplay));
+                OnPropertyChanged(nameof(HasUpdate));
+                OnPropertyChanged(nameof(UpdateBadge));
+            }
         }
 
         public string PackageId => _model.PackageId;
@@ -52,6 +90,15 @@ namespace NuGetManagerSlim.ViewModels
         public string UpdateButtonAccessibleName => $"Update {PackageId} to {LatestStableVersion}";
 
         public string GroupKey => _model.IsTransitive ? "Implicitly installed" : "Packages";
+
+        public string? IconUrl => _iconUrlOverride ?? _model.IconUrl;
+
+        public bool HasIcon => !string.IsNullOrEmpty(IconUrl);
+
+        public bool CanQuickInstall => !IsInstalled
+            && (_model.LatestStableVersion != null || _model.LatestPrereleaseVersion != null);
+
+        public string InstallButtonAccessibleName => $"Install {PackageId}";
 
         public PackageModel Model => _model;
     }

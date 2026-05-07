@@ -19,6 +19,7 @@ namespace NuGetManagerSlim.Models
         public string? RequiredByPackageId { get; init; }
         public string? ReadmeUrl { get; init; }
         public string? ProjectUrl { get; init; }
+        public string? IconUrl { get; init; }
         public IReadOnlyList<FrameworkVersionInfo> PerFrameworkVersions { get; init; } = [];
         public IReadOnlyList<PackageDependencyInfo> Dependencies { get; init; } = [];
     }
