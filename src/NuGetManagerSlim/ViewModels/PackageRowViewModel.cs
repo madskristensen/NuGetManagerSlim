@@ -85,9 +85,18 @@ namespace NuGetManagerSlim.ViewModels
             && _model.LatestStableVersion != null
             && _model.LatestStableVersion > _model.InstalledVersion;
 
-        public string InstalledVersionDisplay => _model.InstalledVersion != null
-            ? $"v{_model.InstalledVersion}"
-            : string.Empty;
+        public string InstalledVersionDisplay
+        {
+            get
+            {
+                if (_model.InstalledVersion != null)
+                {
+                    return $"v{_model.InstalledVersion}";
+                }
+                var latest = _model.LatestStableVersion ?? _model.LatestPrereleaseVersion;
+                return latest != null ? $"v{latest}" : string.Empty;
+            }
+        }
 
         public string UpdateBadge => HasUpdate ? $"→ {_model.LatestStableVersion}" : string.Empty;
 
