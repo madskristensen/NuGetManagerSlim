@@ -662,7 +662,6 @@
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <CheckBox Grid.Column="0"
                           IsChecked="{Binding FilterPrerelease}"
@@ -677,10 +676,6 @@
                         Padding="8,2"
                         Margin="4,0"
                         AutomationProperties.Name="View operation log" />
-                <Button Grid.Column="2" Content="&#x21BB; Refresh"
-                        Command="{Binding RefreshCommand}"
-                        Padding="8,2"
-                        AutomationProperties.Name="Refresh package list" />
             </Grid>
         </Border>
 
