@@ -16,6 +16,19 @@ namespace NuGetManagerSlim.Services
             CancellationToken cancellationToken,
             IReadOnlyCollection<string>? sourceNameFilter = null);
 
+        /// <summary>
+        /// Returns cached search results synchronously when available. Used by the
+        /// view model to render the package list without a transient skeleton flash
+        /// when the same search has been issued recently.
+        /// </summary>
+        bool TryGetCachedSearch(
+            string query,
+            bool includePrerelease,
+            int skip,
+            int take,
+            IReadOnlyCollection<string>? sourceNameFilter,
+            out IReadOnlyList<PackageModel> results);
+
         Task<PackageModel?> GetPackageMetadataAsync(
             string packageId,
             CancellationToken cancellationToken);

@@ -121,6 +121,18 @@ namespace NuGetManagerSlim.Services
             return false;
         }
 
+        public bool TryGetCachedSearch(
+            string query,
+            bool includePrerelease,
+            int skip,
+            int take,
+            IReadOnlyCollection<string>? sourceNameFilter,
+            out IReadOnlyList<PackageModel> results)
+        {
+            var key = BuildSearchCacheKey(query ?? string.Empty, includePrerelease, skip, take, sourceNameFilter);
+            return TryGetCachedSearch(key, out results);
+        }
+
         private void StoreCachedSearch(string key, IReadOnlyList<PackageModel> results)
         {
             lock (_searchCacheLock)

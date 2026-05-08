@@ -37,6 +37,13 @@ namespace NuGetManagerSlim.ToolWindows
             var viewModel = new MainViewModel(projectService, feedService, restoreMonitor, mruService);
             await viewModel.InitializeAsync(cancellationToken);
 
+            // CreateAsync runs before the tool window is actually presented to
+            // the user, so awaiting prefetch here lets us pay the cost while
+            // the window is still being constructed. By the time the user
+            // selects a project, the empty-query Browse search and MRU list
+            // are already in cache, so the first render is skeleton-free.
+            await viewModel.PrewarmAsync(cancellationToken);
+
             var session = (viewModel, feedService, restoreMonitor);
             if (Pane.Instance != null)
             {

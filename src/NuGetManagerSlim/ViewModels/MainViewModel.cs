@@ -209,6 +209,34 @@ namespace NuGetManagerSlim.ViewModels
             }
         }
 
+        // Prefetches project-independent data so the very first user
+        // interaction is served from cache. Intended to be awaited from the
+        // tool window's CreateAsync alongside InitializeAsync; the tool
+        // window pane construction happens before the window is shown,
+        // which gives us a free window to land warm caches.
+        public async Task PrewarmAsync(CancellationToken cancellationToken)
+        {
+            try
+            {
+                // Prime the Browse "empty query" search for the prerelease
+                // mode the user actually has on (settings have already been
+                // loaded by this point). Most users land on Browse with an
+                // empty search, so this turns their first view into a cache
+                // hit (no skeleton).
+                var emptySearch = _feedService.SearchAsync(string.Empty, FilterPrerelease, 0, 50, cancellationToken);
+
+                // MRU package list (recently installed in this VS session) - needed
+                // for ranking remote results on the very first Browse render.
+                var mru = _mruService != null
+                    ? _mruService.GetRecentAsync(cancellationToken)
+                    : Task.FromResult<IReadOnlyList<PackageModel>>(Array.Empty<PackageModel>());
+
+                await Task.WhenAll(emptySearch, mru).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex) { await ex.LogAsync(); }
+        }
+
         public async Task SetCurrentProjectAsync(string projectFullPath, string projectDisplayName, CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrEmpty(projectFullPath)) return;
@@ -324,6 +352,31 @@ namespace NuGetManagerSlim.ViewModels
             {
                 if (!FilterInstalled && !FilterUpdates)
                 {
+                    // Cache hit: skip the skeleton/loading flash and render the
+                    // results synchronously alongside the installed list. The
+                    // installed lookup is local (no network) so it's effectively
+                    // free at this point.
+                    if (_feedService.TryGetCachedSearch(cleanQuery ?? string.Empty, FilterPrerelease, 0, 50, sourceFilter, out var cachedResults))
+                    {
+                        var installedFromCache = CurrentProject != null
+                            ? await _projectService.GetInstalledPackagesAsync(CurrentProject, ct).ConfigureAwait(true)
+                            : Array.Empty<PackageModel>();
+                        var mruFromCache = _mruService != null
+                            ? await _mruService.GetRecentAsync(ct).ConfigureAwait(true)
+                            : Array.Empty<PackageModel>();
+                        ct.ThrowIfCancellationRequested();
+                        ApplyRemoteResults(
+                            MergeInstalledOnTop(installedFromCache, RankByMru(cachedResults, mruFromCache), cleanQuery),
+                            BuildInstalledMap(installedFromCache));
+
+                        var needsEnrichCache = _packages
+                            .Where(r => r.IsInstalled && r.LatestStableVersion == null)
+                            .ToList();
+                        if (needsEnrichCache.Count > 0)
+                            EnrichInstalledMetadataInBackground(needsEnrichCache);
+                        return;
+                    }
+
                     IsRemoteLoading = true;
                     var searchTask = _feedService.SearchAsync(cleanQuery ?? string.Empty, FilterPrerelease, 0, 50, ct, sourceFilter);
                     var installedTask = CurrentProject != null
