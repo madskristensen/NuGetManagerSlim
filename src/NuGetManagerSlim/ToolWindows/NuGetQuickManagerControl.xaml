@@ -575,7 +575,7 @@
 
         <!-- Splitter between list and detail -->
         <GridSplitter Grid.Row="1" Height="4" HorizontalAlignment="Stretch"
-                      Background="{DynamicResource {x:Static vsshell:VsBrushes.CommandBarBorderKey}}"
+                      Background="{DynamicResource {x:Static vsui:EnvironmentColors.PanelSeparatorBrushKey}}"
                       ShowsPreview="True" />
 
         <!-- F: Detail pane -->
@@ -697,7 +697,7 @@
         <!-- G: Status bar -->
         <Border Grid.Row="3" BorderThickness="0,1,0,0"
                 BorderBrush="{DynamicResource {x:Static vsshell:VsBrushes.CommandBarBorderKey}}"
-                Background="{DynamicResource {x:Static vsui:EnvironmentColors.StatusBarDefaultBrushKey}}"
+                Background="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowBackgroundKey}}"
                 Padding="6,3">
             <Grid>
                 <Grid.ColumnDefinitions>
@@ -709,7 +709,7 @@
                           VerticalAlignment="Center"
                           Margin="4,0,8,0"
                           FontSize="11"
-                          Foreground="{DynamicResource {x:Static vsui:EnvironmentColors.StatusBarDefaultTextBrushKey}}"
+                          Foreground="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowTextKey}}"
                           AutomationProperties.Name="Include prerelease versions" />
             </Grid>
         </Border>

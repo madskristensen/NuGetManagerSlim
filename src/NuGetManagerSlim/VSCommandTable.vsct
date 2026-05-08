@@ -44,6 +44,7 @@
 				<Parent guid="NuGetManagerSlim" id="ViewModeMenuGroup" />
 				<Icon guid="ImageCatalogGuid" id="NuGet" />
 				<CommandFlag>IconIsMoniker</CommandFlag>
+        <CommandFlag>FixMenuController</CommandFlag>
 				<Strings>
 					<ButtonText>Browse</ButtonText>
 					<ToolTipText>Browse packages from your enabled sources</ToolTipText>

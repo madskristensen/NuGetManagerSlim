@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Community.VisualStudio.Toolkit;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.VisualStudio.Threading;
 using NuGet.Versioning;
 using NuGetManagerSlim.Models;
 using NuGetManagerSlim.Services;
@@ -416,11 +417,21 @@ namespace NuGetManagerSlim.ViewModels
                 }
 
                 if (FilterUpdates)
+                {
+                    // HasUpdate depends on LatestStableVersion which is normally
+                    // populated asynchronously by EnrichInstalledMetadataInBackground.
+                    // In the Updates view we have to know latest versions up front,
+                    // so synchronously fan out metadata fetches before filtering.
+                    await EnrichRowsAsync(rows, cancellationToken).ConfigureAwait(true);
                     rows = rows.Where(r => r.HasUpdate).ToList();
+                }
 
                 _packages.ReplaceAll(rows.OrderBy(r => r.IsTransitive).ThenBy(r => r.PackageId));
 
-                EnrichInstalledMetadataInBackground(Packages.ToList());
+                if (!FilterUpdates)
+                {
+                    EnrichInstalledMetadataInBackground(Packages.ToList());
+                }
                 SeedMruFromInstalled(installed);
 
                 // Transitive packages are read from project.assets.json which
@@ -450,6 +461,31 @@ namespace NuGetManagerSlim.ViewModels
 
         private CancellationTokenSource? _enrichCts;
         private CancellationTokenSource? _transitiveCts;
+
+        // Awaitable variant of metadata enrichment used by the Updates view,
+        // which has to know each installed package's latest version before it
+        // can decide whether to include the row.
+        private async Task EnrichRowsAsync(IReadOnlyList<PackageRowViewModel> rows, CancellationToken ct)
+        {
+            if (rows == null || rows.Count == 0) return;
+            await TaskScheduler.Default;
+            var tasks = rows.Select(async row =>
+            {
+                if (ct.IsCancellationRequested) return;
+                await s_enrichmentThrottle.WaitAsync(ct).ConfigureAwait(false);
+                try
+                {
+                    var meta = await _feedService.GetPackageMetadataAsync(row.PackageId, ct).ConfigureAwait(false);
+                    if (meta == null || ct.IsCancellationRequested) return;
+                    row.ApplyMetadata(meta);
+                }
+                catch (OperationCanceledException) { }
+                catch (Exception ex) { await ex.LogAsync(); }
+                finally { s_enrichmentThrottle.Release(); }
+            });
+            try { await Task.WhenAll(tasks).ConfigureAwait(false); }
+            catch (OperationCanceledException) { }
+        }
 
         private void EnrichInstalledMetadataInBackground(IReadOnlyList<PackageRowViewModel> rows)
         {
