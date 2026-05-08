@@ -38,18 +38,33 @@ namespace NuGetManagerSlim.Services
                 var projectPaths = ResolveScopePaths(scope);
                 if (projectPaths.Count == 0) return [];
 
-                // The project file is parsed with synchronous XDocument.Load, which
-                // would otherwise stall the UI thread on every filter toggle / project
-                // switch. Hop to the threadpool via JTF so the I/O + parse runs off
-                // the dispatcher.
-                await TaskScheduler.Default;
-
-                cancellationToken.ThrowIfCancellationRequested();
-
                 var byId = new Dictionary<string, PackageModel>(StringComparer.OrdinalIgnoreCase);
                 foreach (var projectPath in projectPaths)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
+
+                    // Prefer NuGet's view of the project (IVsPackageInstallerServices) so
+                    // we pick up SDK-injected refs (MSTest.Sdk, etc.), Central Package
+                    // Management versions, and conditional PackageReferences that the raw
+                    // .csproj XML doesn't expose. Falls back to XDocument parsing only
+                    // when the project isn't loaded in the current solution.
+                    var fromNuGet = await TryGetInstalledFromNuGetAsync(projectPath, cancellationToken).ConfigureAwait(false);
+                    if (fromNuGet != null)
+                    {
+                        foreach (var pkg in fromNuGet)
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+                            MergeInstalled(byId, pkg);
+                        }
+                        continue;
+                    }
+
+                    // The project file is parsed with synchronous XDocument.Load, which
+                    // would otherwise stall the UI thread on every filter toggle / project
+                    // switch. Hop to the threadpool so the I/O + parse runs off
+                    // the dispatcher.
+                    await TaskScheduler.Default;
+
                     foreach (var pkg in ReadInstalledFromProject(projectPath))
                     {
                         cancellationToken.ThrowIfCancellationRequested();
@@ -70,6 +85,64 @@ namespace NuGetManagerSlim.Services
                 await ex.LogAsync();
                 return [];
             }
+        }
+
+        // Returns null when the project is not loaded in the current solution
+        // (so the caller can fall back to raw XML parsing). Returns an empty
+        // list when the project is loaded but has no installed packages.
+        private static async Task<IReadOnlyList<PackageModel>?> TryGetInstalledFromNuGetAsync(
+            string projectPath,
+            CancellationToken cancellationToken)
+        {
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
+
+            var project = await FindDteProjectAsync(projectPath);
+            if (project == null) return null;
+
+            var services = await GetServiceAsync<IVsPackageInstallerServices>();
+            if (services == null) return null;
+
+            var projectName = Path.GetFileNameWithoutExtension(projectPath);
+
+            // GetInstalledPackages(Project) walks NuGet's package management
+            // pipeline which can do MEF activation and (rarely) brief I/O.
+            // Marshal to the threadpool to avoid blocking the dispatcher.
+            await TaskScheduler.Default;
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            IEnumerable<IVsPackageMetadata> installed;
+            try
+            {
+                installed = services.GetInstalledPackages(project);
+            }
+            catch (Exception ex)
+            {
+                // Project type that NuGet doesn't recognize - treat as "not loaded"
+                // so the XDocument fallback runs.
+                await ex.LogAsync();
+                return null;
+            }
+
+            var result = new List<PackageModel>();
+            foreach (var meta in installed)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (string.IsNullOrEmpty(meta?.Id)) continue;
+
+                NuGetVersion? version = null;
+                if (!string.IsNullOrWhiteSpace(meta!.VersionString))
+                    NuGetVersion.TryParse(meta.VersionString, out version);
+
+                result.Add(new PackageModel
+                {
+                    PackageId = meta.Id,
+                    InstalledVersion = version,
+                    SourceName = projectName,
+                });
+            }
+
+            return result;
         }
 
         // Reads installed packages from a project file by inspecting <PackageReference>
