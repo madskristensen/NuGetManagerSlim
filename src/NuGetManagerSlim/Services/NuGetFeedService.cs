@@ -441,6 +441,7 @@ namespace NuGetManagerSlim.Services
                         SourceName = source.Name,
                         ProjectUrl = latest.ProjectUrl?.ToString(),
                         IconUrl = latest.IconUrl?.ToString(),
+                        Published = latest.Published,
                         Dependencies = deps,
                     };
                 }

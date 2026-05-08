@@ -891,7 +891,9 @@ namespace NuGetManagerSlim.ViewModels
         public async Task ReloadPackagesAsync()
         {
             // Re-load packages using the current scope, view-mode and search.
-            if (FilterInstalled || FilterUpdates)
+            // Solution scope is read-only and never shows online search results -
+            // it always shows the aggregated installed list.
+            if (FilterInstalled || FilterUpdates || IsReadOnlyScope)
                 await ApplyFiltersAsync();
             else
                 await SearchRemoteAsync();

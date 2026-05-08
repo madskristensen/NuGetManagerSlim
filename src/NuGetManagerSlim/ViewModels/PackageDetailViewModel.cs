@@ -27,6 +27,9 @@ namespace NuGetManagerSlim.ViewModels
         [ObservableProperty] private string _readmePreview = string.Empty;
         [ObservableProperty] private string? _licenseUrl;
         [ObservableProperty] private string? _projectUrl;
+        [ObservableProperty] private string _publishedDisplay = string.Empty;
+        [ObservableProperty] private bool _hasProjectUrl;
+        [ObservableProperty] private bool _hasPublished;
         [ObservableProperty] private NuGetVersion? _selectedVersion;
         [ObservableProperty] private bool _canInstall;
         [ObservableProperty] private bool _canUpdate;
@@ -110,6 +113,17 @@ namespace NuGetManagerSlim.ViewModels
                 License = metadata.LicenseExpression ?? (metadata.LicenseUrl != null ? "View license" : "Unknown");
                 LicenseUrl = metadata.LicenseUrl ?? metadata.ProjectUrl;
                 ProjectUrl = metadata.ProjectUrl;
+                HasProjectUrl = !string.IsNullOrEmpty(metadata.ProjectUrl);
+                if (metadata.Published.HasValue && metadata.Published.Value.Year > 1901)
+                {
+                    PublishedDisplay = metadata.Published.Value.LocalDateTime.ToString("d");
+                    HasPublished = true;
+                }
+                else
+                {
+                    PublishedDisplay = string.Empty;
+                    HasPublished = false;
+                }
                 DownloadCountDisplay = metadata.DownloadCount > 0
                     ? FormatDownloadCount(metadata.DownloadCount)
                     : "N/A";
@@ -208,6 +222,13 @@ namespace NuGetManagerSlim.ViewModels
         {
             if (!string.IsNullOrEmpty(LicenseUrl))
                 System.Diagnostics.Process.Start(LicenseUrl);
+        }
+
+        [RelayCommand]
+        private void OpenProjectUrl()
+        {
+            if (!string.IsNullOrEmpty(ProjectUrl))
+                System.Diagnostics.Process.Start(ProjectUrl);
         }
 
         [RelayCommand]

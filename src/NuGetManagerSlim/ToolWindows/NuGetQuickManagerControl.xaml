@@ -586,23 +586,36 @@
                 BorderBrush="{DynamicResource {x:Static vsshell:VsBrushes.CommandBarBorderKey}}"
                 Background="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowBackgroundKey}}"
                 Visibility="{Binding HasSelectedPackage, Converter={StaticResource BoolToVis}}">
-            <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="8,6">
+            <ScrollViewer x:Name="DetailScrollViewer" VerticalScrollBarVisibility="Auto" Padding="8,6">
                 <StackPanel>
-                    <!-- Package title + version dropdown -->
+                    <!-- Package title + version dropdown + install button -->
                     <Grid Margin="0,0,0,6">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <TextBlock Grid.Column="0"
                                    Text="{Binding Detail.PackageId}"
                                    FontSize="15" FontWeight="Bold"
+                                   VerticalAlignment="Center"
                                    TextTrimming="CharacterEllipsis" />
                         <ComboBox Grid.Column="1"
                                   ItemsSource="{Binding Detail.AvailableVersions}"
                                   SelectedItem="{Binding Detail.SelectedVersion}"
                                   MinWidth="100" Margin="8,0,0,0"
+                                  VerticalAlignment="Center"
                                   AutomationProperties.Name="Package version" />
+                        <Button Grid.Column="2"
+                                Command="{Binding Detail.InstallCommand}"
+                                Style="{StaticResource IconButtonStyle}"
+                                Margin="4,0,0,0"
+                                ToolTip="Install"
+                                AutomationProperties.Name="Install package"
+                                Visibility="{Binding Detail.CanInstall, Converter={StaticResource BoolToVis}}">
+                            <imaging:CrispImage Width="16" Height="16"
+                                                Moniker="{x:Static catalog:KnownMonikers.CloudDownload}" />
+                        </Button>
                     </Grid>
 
                     <!-- Description -->
@@ -624,62 +637,34 @@
                         <TextBlock Style="{StaticResource MutedTextStyle}" Margin="0,0,12,0">
                             <Run Text="Downloads: " /><Run Text="{Binding Detail.DownloadCountDisplay}" />
                         </TextBlock>
-                        <TextBlock Style="{StaticResource MutedTextStyle}">
+                        <TextBlock Style="{StaticResource MutedTextStyle}" Margin="0,0,12,0">
                             <Run Text="Authors: " /><Run Text="{Binding Detail.Authors}" />
+                        </TextBlock>
+                        <TextBlock Style="{StaticResource MutedTextStyle}" Margin="0,0,12,0"
+                                   Visibility="{Binding Detail.HasPublished, Converter={StaticResource BoolToVis}}">
+                            <Run Text="Last updated: " /><Run Text="{Binding Detail.PublishedDisplay}" />
+                        </TextBlock>
+                        <TextBlock Style="{StaticResource MutedTextStyle}"
+                                   Visibility="{Binding Detail.HasProjectUrl, Converter={StaticResource BoolToVis}}">
+                            <Hyperlink Command="{Binding Detail.OpenProjectUrlCommand}"
+                                       ToolTip="{Binding Detail.ProjectUrl}">
+                                <Run Text="Project website" />
+                            </Hyperlink>
                         </TextBlock>
                     </WrapPanel>
 
-                    <!-- Project membership -->
-                    <TextBlock Text="Projects:" FontWeight="SemiBold" FontSize="11" Margin="0,0,0,3" />
-                    <ItemsControl ItemsSource="{Binding Detail.ProjectMemberships}" Margin="0,0,0,6">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <StackPanel Orientation="Horizontal" Margin="0,1">
-                                    <CheckBox IsChecked="{Binding IsSelected}"
-                                              Content="{Binding DisplayText}"
-                                              FontSize="11" />
-                                </StackPanel>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-
-                    <!-- Action buttons -->
+                    <!-- Action buttons (Update All Projects). Install is moved
+                         up next to the version dropdown; Update and Uninstall
+                         are intentionally omitted from the detail pane (the
+                         row's inline Update / Uninstall icon buttons are the
+                         canonical entry points). -->
                     <WrapPanel Margin="0,0,0,6">
-                        <Button Content="Install"
-                                Command="{Binding Detail.InstallCommand}"
-                                Padding="10,4" Margin="0,0,4,0"
-                                Visibility="{Binding Detail.CanInstall, Converter={StaticResource BoolToVis}}"
-                                AutomationProperties.Name="Install package" />
-                        <Button Content="Update"
-                                Command="{Binding Detail.UpdateCommand}"
-                                Padding="10,4" Margin="0,0,4,0"
-                                Visibility="{Binding Detail.CanUpdate, Converter={StaticResource BoolToVis}}"
-                                AutomationProperties.Name="Update package" />
                         <Button Content="Update All Projects"
                                 Command="{Binding Detail.UpdateAllProjectsCommand}"
                                 Padding="10,4" Margin="0,0,4,0"
                                 Visibility="{Binding Detail.CanUpdateAllProjects, Converter={StaticResource BoolToVis}}"
                                 AutomationProperties.Name="Update package in all projects" />
-                        <Button Content="Uninstall"
-                                Command="{Binding Detail.UninstallCommand}"
-                                Padding="10,4"
-                                Visibility="{Binding Detail.CanUninstall, Converter={StaticResource BoolToVis}}"
-                                AutomationProperties.Name="Uninstall package" />
                     </WrapPanel>
-
-                    <!-- README preview -->
-                    <Expander Header="README" IsExpanded="False" Margin="0,0,0,4">
-                        <StackPanel>
-                            <TextBlock Text="{Binding Detail.ReadmePreview}"
-                                       TextWrapping="Wrap"
-                                       Style="{StaticResource MutedTextStyle}"
-                                       MaxHeight="120"
-                                       Margin="0,4,0,4" />
-                            <TextBlock>
-                                <Hyperlink Command="{Binding Detail.OpenNuGetOrgCommand}">View on nuget.org</Hyperlink>
-                            </TextBlock>
-                        </StackPanel>
-                    </Expander>
 
                     <!-- Dependency tree (grouped by target framework) -->
                     <Expander Header="Dependencies" IsExpanded="False">

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using NuGet.Versioning;
 
@@ -20,6 +21,7 @@ namespace NuGetManagerSlim.Models
         public string? ReadmeUrl { get; init; }
         public string? ProjectUrl { get; init; }
         public string? IconUrl { get; init; }
+        public DateTimeOffset? Published { get; init; }
         public IReadOnlyList<FrameworkVersionInfo> PerFrameworkVersions { get; init; } = [];
         public IReadOnlyList<PackageDependencyInfo> Dependencies { get; init; } = [];
     }

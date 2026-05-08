@@ -19,6 +19,12 @@ namespace NuGetManagerSlim.ToolWindows
             viewModel.AttachDispatcher(Dispatcher);
             DataContext = viewModel;
 
+            // Reset the detail pane scroll position whenever a new package is
+            // loaded so the user always lands at the title - otherwise the
+            // pane retains the previous package's scroll offset and may open
+            // mid-dependency-list.
+            viewModel.PropertyChanged += OnViewModelPropertyChanged;
+
             // Group rows by GroupKey so transitive packages render under a
             // dedicated "Transitive packages" header. The header for the
             // default "Packages" group is collapsed in XAML so the Browse
@@ -28,6 +34,14 @@ namespace NuGetManagerSlim.ToolWindows
             {
                 view.GroupDescriptions.Add(
                     new PropertyGroupDescription(nameof(PackageRowViewModel.GroupKey)));
+            }
+        }
+
+        private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName == nameof(MainViewModel.Detail))
+            {
+                DetailScrollViewer?.ScrollToTop();
             }
         }
 
