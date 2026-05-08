@@ -152,11 +152,42 @@
         <Style x:Key="MutedTextStyle" TargetType="TextBlock">
             <Setter Property="Foreground" Value="{DynamicResource {x:Static vsshell:VsBrushes.GrayTextKey}}" />
             <Setter Property="FontSize" Value="11" />
+            <Style.Triggers>
+                <!-- Switch muted text to the selection text color while the row is selected
+                     so it stays readable against the selection background. -->
+                <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
+                    <Setter Property="Foreground" Value="{DynamicResource {x:Static vsui:TreeViewColors.SelectedItemInactiveTextBrushKey}}" />
+                </DataTrigger>
+            </Style.Triggers>
         </Style>
         <Style x:Key="VersionBadgeStyle" TargetType="TextBlock">
             <Setter Property="FontSize" Value="10" />
-            <Setter Property="Padding" Value="3,1" />
             <Setter Property="Foreground" Value="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowTextKey}}" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
+                    <Setter Property="Foreground" Value="{DynamicResource {x:Static vsui:TreeViewColors.SelectedItemInactiveTextBrushKey}}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <!-- Pill that marks installed packages in the Browse list. Hidden in
+             the Installed scope (where every row is installed and the badge
+             would just be noise). -->
+        <Style x:Key="InstalledPillStyle" TargetType="Border">
+            <Setter Property="Background" Value="#2E8B57" />
+            <Setter Property="CornerRadius" Value="3" />
+            <Setter Property="Padding" Value="5,1" />
+            <Setter Property="Margin" Value="6,0,0,0" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Visibility" Value="Collapsed" />
+            <Style.Triggers>
+                <MultiDataTrigger>
+                    <MultiDataTrigger.Conditions>
+                        <Condition Binding="{Binding IsInstalled}" Value="True" />
+                        <Condition Binding="{Binding DataContext.FilterInstalled, RelativeSource={RelativeSource AncestorType=ListBox}}" Value="False" />
+                    </MultiDataTrigger.Conditions>
+                    <Setter Property="Visibility" Value="Visible" />
+                </MultiDataTrigger>
+            </Style.Triggers>
         </Style>
         <!-- Themed ListBox/ListBoxItem so selection follows the active VS theme. -->
         <Style TargetType="ListBox">
@@ -187,10 +218,12 @@
                                         Value="{DynamicResource {x:Static vsui:TreeViewColors.SelectedItemInactiveBrushKey}}" />
                             </Trigger>
                             <Trigger Property="IsSelected" Value="True">
+                                <!-- Use the lighter inactive selection brush so the blue update
+                                     arrow icon stays visible on selected rows. -->
                                 <Setter TargetName="Bd" Property="Background"
-                                        Value="{DynamicResource {x:Static vsui:TreeViewColors.SelectedItemActiveBrushKey}}" />
+                                        Value="{DynamicResource {x:Static vsui:TreeViewColors.SelectedItemInactiveBrushKey}}" />
                                 <Setter Property="Foreground"
-                                        Value="{DynamicResource {x:Static vsui:TreeViewColors.SelectedItemActiveTextBrushKey}}" />
+                                        Value="{DynamicResource {x:Static vsui:TreeViewColors.SelectedItemInactiveTextBrushKey}}" />
                             </Trigger>
                             <MultiTrigger>
                                 <MultiTrigger.Conditions>
@@ -338,26 +371,26 @@
                                 <TextBlock Text="{Binding PackageId}" FontSize="12"
                                            TextTrimming="CharacterEllipsis"
                                            VerticalAlignment="Center" />
-                                <TextBlock Text=" &#x2713;"
-                                           Foreground="#2E8B57"
-                                           VerticalAlignment="Center"
-                                           Visibility="{Binding IsInstalled, Converter={StaticResource BoolToVis}}"
-                                           ToolTip="Installed" />
+                                <Border Style="{StaticResource InstalledPillStyle}"
+                                        ToolTip="This package is installed in the current project">
+                                    <TextBlock Text="Installed"
+                                               Foreground="White"
+                                               FontSize="9"
+                                               FontWeight="SemiBold" />
+                                </Border>
                                 <TextBlock Text=" [pre]" FontSize="10" VerticalAlignment="Center"
                                            Foreground="{DynamicResource {x:Static vsshell:VsBrushes.GrayTextKey}}"
                                            Visibility="{Binding IsPrerelease, Converter={StaticResource BoolToVis}}" />
                             </StackPanel>
 
-                            <!-- Version info + update badge -->
+                            <!-- Version + author. The update arrow icon in the action area
+                                 already signals that a newer version is available, so we don't
+                                 repeat that information inline here. -->
                             <StackPanel Grid.Column="1" Grid.Row="1" Orientation="Horizontal" Margin="8,1,0,0">
                                 <TextBlock Text="{Binding InstalledVersionDisplay}"
                                            Style="{StaticResource MutedTextStyle}" />
-                                <TextBlock Text="{Binding UpdateBadge}"
-                                           Foreground="{DynamicResource {x:Static vsui:EnvironmentColors.AccentMediumBrushKey}}"
-                                           Style="{StaticResource VersionBadgeStyle}"
-                                           Visibility="{Binding HasUpdate, Converter={StaticResource BoolToVis}}" />
                                 <TextBlock Text="{Binding AuthorDisplay}"
-                                           Style="{StaticResource MutedTextStyle}" Margin="8,0,0,0" />
+                                           Style="{StaticResource MutedTextStyle}" Margin="6,0,0,0" />
                             </StackPanel>
 
                             <!-- Quick action area. The update button is always visible when an
@@ -498,9 +531,11 @@
                     </DataTemplate>
                 </ListBox.ItemTemplate>
 
-                <!-- Transitive section header. The default "Packages" group's
-                     header is collapsed so non-transitive rows render as a flat
-                     list (Browse view, no transitives, looks unchanged). -->
+                <!-- Section headers. The default "Packages" group's header is
+                     collapsed so non-installed Browse rows render as a flat
+                     list. The "Installed" header is also collapsed when the
+                     user is on the Installed scope (every row is installed,
+                     so the header would be redundant). -->
                 <ListBox.GroupStyle>
                     <GroupStyle>
                         <GroupStyle.HeaderTemplate>
@@ -512,6 +547,10 @@
                                             <Setter Property="Padding" Value="4,8,0,2" />
                                             <Style.Triggers>
                                                 <DataTrigger Binding="{Binding Name}" Value="Packages">
+                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                    <Setter Property="Padding" Value="0" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Name}" Value="Installed">
                                                     <Setter Property="Visibility" Value="Collapsed" />
                                                     <Setter Property="Padding" Value="0" />
                                                 </DataTrigger>

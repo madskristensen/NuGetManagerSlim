@@ -5,102 +5,78 @@
 # NuGet Quick Manager for Visual Studio
 
 [![Build](https://github.com/madskristensen/NuGetManagerSlim/actions/workflows/build.yaml/badge.svg)](https://github.com/madskristensen/NuGetManagerSlim/actions/workflows/build.yaml)
-![GitHub Sponsors](https://img.shields.io/github/sponsors/madskristensen)
+[![GitHub Sponsors](https://img.shields.io/github/sponsors/madskristensen)](https://github.com/sponsors/madskristensen)
 
-Download this extension from the [Visual Studio Marketplace][marketplace]
-or get the [CI build][vsixgallery].
+**A faster, lighter NuGet Package Manager for Visual Studio.** One dockable tool window, one filterable list, no blocking dialogs.
 
-----------------------------------------
+Download from the [Visual Studio Marketplace][marketplace] or get the latest [CI build][vsixgallery].
 
-An alternative **NuGet Package Manager** for Visual Studio. A single, dockable tool window replaces the in-box Browse / Installed / Updates tab flow with a unified, filterable package list where every search, install, update, and uninstall runs asynchronously with inline progress - no blocking dialogs, no frozen UI.
+---
 
-The extension coexists with the built-in NuGet Package Manager - both can be open at the same time and write to the same project files without conflict.
+## Why another NuGet manager?
 
-## Features
+The in-box Package Manager opens a large and somewhat heavy window, makes you flip between Browse / Installed / Updates tabs, and blocks the UI while it talks to the feed. NuGet Quick Manager replaces that flow with a single dockable tool window where every search, install, update, and uninstall runs asynchronously - the UI stays responsive the whole time.
 
-### Async-first tool window
+It coexists with the built-in NuGet Package Manager. Both can be open at the same time and write to the same project files without conflict.
 
-- Single dockable tool window titled **NuGet Quick Manager**
-- Open from the **View** menu, the command palette, or with **Ctrl+Alt+N**
-- Every feed query and package operation runs on a background thread
-- The tool window stays fully interactive during all operations
+## What Can You Do?
 
-### Unified, filterable package list
+**One unified list** - Installed packages pin to the top of the Browse list with a clear "Installed" header, so you never have to flip tabs to see what's already there.
 
-- One scrollable list instead of three tabs
-- Each row shows package icon, ID, installed version, available version, author, and source badge
-- Composable filter toggles: **Installed**, **Updates**, and **Prerelease**
-- Inline **Update** button on rows that have a newer version available
+**Search that keeps up with you** - As-you-type local filtering on already-loaded results, with debounced remote feed queries running in the background.
 
-### As-you-type search
+**Inline actions** - Install, update, and uninstall directly from the row. Update icons stay visible at rest so you can spot outdated packages at a glance.
 
-- Search box at the top of the tool window
-- Instant local filtering of already-loaded results
-- Debounced remote feed queries with an inline spinner
-- Recent-query history available from the search box
+**See your transitive dependencies** - Indirect (transitive) packages appear under their own "Transitive packages" header in the Installed view, with a "required by" label so you know who pulled them in.
 
-### Project scope
+**Detail pane on demand** - Description, license, downloads, authors, version history, project membership, dependencies, and a README preview - all without leaving the window.
 
-- Dropdown lists every project in the solution plus an **Entire Solution** option
-- Defaults to the active project in Solution Explorer
-- Switching scope re-filters the list and refreshes installed and version data
+## Get Started in 30 Seconds
 
-### Install, update, and uninstall
+1. **Install** from the [Visual Studio Marketplace][marketplace]
+2. **Right-click** a project in Solution Explorer and pick **Manage NuGet Packages...**
+3. **Search, browse, install** - the tool window stays interactive throughout
 
-- One-click **Install**, **Update**, and **Uninstall** actions in the detail pane
-- Inline progress on the affected row and a status message in the status bar
-- Multi-project updates execute per project sequentially with per-project progress
+## Tips
 
-### Detail pane
+| Action | How |
+|--------|-----|
+| Filter to a specific feed | Type `source:"nuget.org"` in the search box |
+| Toggle prerelease versions | The **Include prerelease** checkbox at the bottom |
+| Switch between Browse / Installed / Updates | The toolbar at the top of the tool window |
+| See which transitive package pulled in a dependency | Look for the **required by** label under the package id |
+| Clear cached feed results | Use the **Refresh** button in the toolbar |
 
-- Package description, author list, license link, and download count
-- Version dropdown with stable and (when toggled) prerelease versions
-- Project membership and dependency tree
-- README preview with a link to the full README
+## FAQ
 
-### Direct vs. transitive packages
+**Q: Does this replace the built-in NuGet Package Manager?**
+A: No. It runs alongside the in-box manager and uses the same NuGet client libraries under the hood, so package operations produce identical results. You can use either one (or both) on the same solution.
 
-- Direct (top-level) packages are visually separated from transitive (implicitly installed) packages
-- Each transitive row shows a **required by** label so dependency provenance is clear
-- Transitive packages are read-only
+**Q: Where do my package sources come from?**
+A: From your existing NuGet configuration (`NuGet.config`). No separate setup.
 
-### Per-framework version state
+**Q: Are packages.config projects supported?**
+A: Yes - both PackageReference (SDK-style) and packages.config projects are recognized for the installed list.
 
-- For multi-targeted projects, package rows show per-framework version badges (for example **v1.2 [net8.0]  v1.0 [net48]**)
-- The detail pane shows a per-framework breakdown so conditional package references are visible
-- Per-framework versions can be updated independently
+**Q: Why are some packages marked as transitive?**
+A: Transitive packages were pulled in by one of your direct dependencies, not added by you. They're shown for visibility (read-only) under the "Transitive packages" header. To change one, update the direct dependency that requires it.
 
-### Source management
+**Q: A package shows no icon - is that a bug?**
+A: Some packages publish an `iconUrl` that resolves to nothing or to a non-image. The default placeholder is shown in those cases. Cached icons live in `%LocalAppData%\NuGetManagerSlim\IconCache`.
 
-- Source selector dropdown with per-feed enable/disable checkboxes and connection-status indicators
-- Inline source panel for toggling feeds, viewing per-feed errors, and adding a new source
-- Error messages name the specific feed and reason - no navigation to external settings pages required
-- Authentication challenges surface an inline **Sign in** link that re-queries the feed through the configured credential provider
+## Contributing
 
-### Inline log and status bar
+This is a passion project, and contributions are welcome.
 
-- Status bar at the bottom shows the last operation result, for example "Installed Serilog 3.1.0 in MyApp (1.2s)"
-- A **View log** link opens a scrollable inline log overlay with full operation history
-- Error messages use plain language with suggested next steps - no internal type names or stack traces
+- **Found a bug?** [Open an issue][repo]
+- **Have an idea?** [Start a discussion][repo]
+- **Want to contribute?** Pull requests are always welcome
 
-### Restore-state visibility
+**If NuGet Quick Manager saves you time**, consider:
 
-- Persistent warning in the status bar when a project's last restore is incomplete
-- A manual **Refresh** button is always available as a guaranteed fallback
+- [Rating it on the Marketplace][marketplace]
+- [Sponsoring on GitHub](https://github.com/sponsors/madskristensen)
 
-## Requirements
+## License
 
-- Visual Studio 2022 (17.0 or later)
-- A solution with one or more projects that use PackageReference
-
-## How it works
-
-The extension hosts its own NuGet UI in a tool window built on the Visual Studio Extensibility platform. Feed queries, dependency resolution, and project file edits go through the standard NuGet client libraries, so the in-box Package Manager and this extension produce identical results and can be used interchangeably on the same solution.
-
-## Contribute
-
-If you find this extension useful, please:
-
-- [Rate it on the Marketplace][marketplace]
-- [Report issues or request features][repo]
-- [Sponsor development](https://github.com/sponsors/madskristensen)
+[Apache 2.0](LICENSE.txt)

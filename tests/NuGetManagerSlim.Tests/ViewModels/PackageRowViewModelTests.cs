@@ -114,6 +114,13 @@ namespace NuGetManagerSlim.Tests.ViewModels
         }
 
         [Fact]
+        public void GroupKey_InstalledDirectPackage_IsInstalled()
+        {
+            var vm = MakeRow(isTransitive: false, installed: "1.0.0");
+            Assert.Equal("Installed", vm.GroupKey);
+        }
+
+        [Fact]
         public void GroupKey_TransitivePackage_IsTransitivePackages()
         {
             var vm = MakeRow(isTransitive: true);

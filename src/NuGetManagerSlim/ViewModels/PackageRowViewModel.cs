@@ -111,7 +111,15 @@ namespace NuGetManagerSlim.ViewModels
 
         public string UpdateButtonAccessibleName => $"Update {PackageId} to {LatestStableVersion}";
 
-        public string GroupKey => _model.IsTransitive ? "Transitive packages" : "Packages";
+        public string GroupKey
+        {
+            get
+            {
+                if (_model.IsTransitive) return "Transitive packages";
+                if (IsInstalled) return "Installed";
+                return "Packages";
+            }
+        }
 
         public string? IconUrl => _iconUrlOverride ?? _model.IconUrl;
 
