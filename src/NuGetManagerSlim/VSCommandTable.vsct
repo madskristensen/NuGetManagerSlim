@@ -45,8 +45,8 @@
 				<Icon guid="ImageCatalogGuid" id="NuGet" />
 				<CommandFlag>IconIsMoniker</CommandFlag>
 				<Strings>
-					<ButtonText>Online</ButtonText>
-					<ToolTipText>Browse online packages from your enabled sources</ToolTipText>
+					<ButtonText>Browse</ButtonText>
+					<ToolTipText>Browse packages from your enabled sources</ToolTipText>
 				</Strings>
 			</Button>
 

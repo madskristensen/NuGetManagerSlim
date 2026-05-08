@@ -114,10 +114,10 @@ namespace NuGetManagerSlim.Tests.ViewModels
         }
 
         [Fact]
-        public void GroupKey_TransitivePackage_IsImplicitlyInstalled()
+        public void GroupKey_TransitivePackage_IsTransitivePackages()
         {
             var vm = MakeRow(isTransitive: true);
-            Assert.Equal("Implicitly installed", vm.GroupKey);
+            Assert.Equal("Transitive packages", vm.GroupKey);
         }
 
         [Fact]

@@ -1,5 +1,7 @@
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 using NuGetManagerSlim.ViewModels;
 
 namespace NuGetManagerSlim.ToolWindows
@@ -16,6 +18,17 @@ namespace NuGetManagerSlim.ToolWindows
             // canonical place to give the VM a deterministic dispatcher.
             viewModel.AttachDispatcher(Dispatcher);
             DataContext = viewModel;
+
+            // Group rows by GroupKey so transitive packages render under a
+            // dedicated "Transitive packages" header. The header for the
+            // default "Packages" group is collapsed in XAML so the Browse
+            // view (no transitives) reads as a flat list.
+            var view = CollectionViewSource.GetDefaultView(viewModel.Packages);
+            if (view != null && view.GroupDescriptions != null && view.GroupDescriptions.Count == 0)
+            {
+                view.GroupDescriptions.Add(
+                    new PropertyGroupDescription(nameof(PackageRowViewModel.GroupKey)));
+            }
         }
 
         private void PackageListBox_SelectionChanged(object sender, SelectionChangedEventArgs e)

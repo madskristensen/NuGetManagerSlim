@@ -82,6 +82,7 @@ namespace NuGetManagerSlim.ViewModels
                                     && _model.LatestStableVersion == null;
 
         public bool HasUpdate => IsInstalled
+            && !IsTransitive
             && _model.LatestStableVersion != null
             && _model.LatestStableVersion > _model.InstalledVersion;
 
@@ -110,7 +111,7 @@ namespace NuGetManagerSlim.ViewModels
 
         public string UpdateButtonAccessibleName => $"Update {PackageId} to {LatestStableVersion}";
 
-        public string GroupKey => _model.IsTransitive ? "Implicitly installed" : "Packages";
+        public string GroupKey => _model.IsTransitive ? "Transitive packages" : "Packages";
 
         public string? IconUrl => _iconUrlOverride ?? _model.IconUrl;
 

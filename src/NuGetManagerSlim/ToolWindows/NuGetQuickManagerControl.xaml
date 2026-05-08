@@ -498,15 +498,27 @@
                     </DataTemplate>
                 </ListBox.ItemTemplate>
 
-                <!-- Transitive section header -->
+                <!-- Transitive section header. The default "Packages" group's
+                     header is collapsed so non-transitive rows render as a flat
+                     list (Browse view, no transitives, looks unchanged). -->
                 <ListBox.GroupStyle>
                     <GroupStyle>
                         <GroupStyle.HeaderTemplate>
                             <DataTemplate>
                                 <TextBlock Text="{Binding Name}"
-                                           Style="{StaticResource MutedTextStyle}"
-                                           FontStyle="Italic"
-                                           Padding="4,6,0,2" />
+                                           FontStyle="Italic">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock" BasedOn="{StaticResource MutedTextStyle}">
+                                            <Setter Property="Padding" Value="4,8,0,2" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Name}" Value="Packages">
+                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                    <Setter Property="Padding" Value="0" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
                             </DataTemplate>
                         </GroupStyle.HeaderTemplate>
                     </GroupStyle>

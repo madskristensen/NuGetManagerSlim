@@ -12,6 +12,10 @@ namespace NuGetManagerSlim.Services
             ProjectScopeModel scope,
             CancellationToken cancellationToken);
 
+        Task<IReadOnlyList<PackageModel>> GetTransitivePackagesAsync(
+            ProjectScopeModel scope,
+            CancellationToken cancellationToken);
+
         Task InstallPackageAsync(
             string projectPath,
             string packageId,

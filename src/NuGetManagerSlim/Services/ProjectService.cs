@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Xml.Linq;
@@ -136,6 +137,170 @@ namespace NuGetManagerSlim.Services
                     }
                 }
             }
+        }
+
+        // Reads the resolved transitive dependency graph from the project's
+        // restore output (obj/project.assets.json). Returns packages that are
+        // pulled in by direct PackageReferences but not declared themselves.
+        // Best-effort: returns an empty list if the project hasn't been
+        // restored yet, the assets file is malformed, or the project isn't
+        // SDK-style. RequiredByPackageId is set to one direct ancestor
+        // (BFS up the dependency edges) so the UI can show "required by: X".
+        public async Task<IReadOnlyList<PackageModel>> GetTransitivePackagesAsync(
+            ProjectScopeModel scope,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                if (scope == null || string.IsNullOrEmpty(scope.ProjectFullPath))
+                    return [];
+
+                await TaskScheduler.Default;
+
+                var projectPath = scope.ProjectFullPath!;
+                var projectDir = Path.GetDirectoryName(projectPath);
+                if (string.IsNullOrEmpty(projectDir)) return [];
+
+                var assetsPath = Path.Combine(projectDir!, "obj", "project.assets.json");
+                if (!File.Exists(assetsPath)) return [];
+
+                cancellationToken.ThrowIfCancellationRequested();
+
+                using var fs = new FileStream(assetsPath, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, useAsync: true);
+                using var doc = await JsonDocument.ParseAsync(fs, default, cancellationToken).ConfigureAwait(false);
+                var root = doc.RootElement;
+
+                // Direct PackageReferences declared in the project. Anything in
+                // `targets` not in this set is transitive.
+                var direct = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                if (root.TryGetProperty("project", out var projectEl)
+                    && projectEl.TryGetProperty("frameworks", out var fws)
+                    && fws.ValueKind == JsonValueKind.Object)
+                {
+                    foreach (var fw in fws.EnumerateObject())
+                    {
+                        if (fw.Value.TryGetProperty("dependencies", out var deps)
+                            && deps.ValueKind == JsonValueKind.Object)
+                        {
+                            foreach (var d in deps.EnumerateObject())
+                                direct.Add(d.Name);
+                        }
+                    }
+                }
+
+                // Build a flat package map and reverse-edge list (child -> parents)
+                // by scanning the first target framework. Multi-targeted projects
+                // typically share the same closure across TFMs; using just one
+                // keeps parsing fast.
+                var nodes = new Dictionary<string, TransitiveNode>(StringComparer.OrdinalIgnoreCase);
+                if (root.TryGetProperty("targets", out var targets) && targets.ValueKind == JsonValueKind.Object)
+                {
+                    foreach (var tf in targets.EnumerateObject())
+                    {
+                        foreach (var entry in tf.Value.EnumerateObject())
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+                            var key = entry.Name;
+                            var slash = key.IndexOf('/');
+                            if (slash <= 0) continue;
+                            var id = key.Substring(0, slash);
+                            var verStr = key.Substring(slash + 1);
+                            if (!entry.Value.TryGetProperty("type", out var typeEl)
+                                || typeEl.ValueKind != JsonValueKind.String
+                                || typeEl.GetString() != "package")
+                                continue;
+                            NuGetVersion.TryParse(verStr, out var ver);
+
+                            if (!nodes.TryGetValue(id, out var node))
+                            {
+                                node = new TransitiveNode { Id = id, Version = ver };
+                                nodes[id] = node;
+                            }
+                            else if (node.Version == null && ver != null)
+                            {
+                                node.Version = ver;
+                            }
+
+                            if (entry.Value.TryGetProperty("dependencies", out var children)
+                                && children.ValueKind == JsonValueKind.Object)
+                            {
+                                foreach (var child in children.EnumerateObject())
+                                {
+                                    if (!nodes.TryGetValue(child.Name, out var childNode))
+                                    {
+                                        childNode = new TransitiveNode { Id = child.Name };
+                                        nodes[child.Name] = childNode;
+                                    }
+                                    if (!childNode.Parents.Contains(id, StringComparer.OrdinalIgnoreCase))
+                                        childNode.Parents.Add(id);
+                                }
+                            }
+                        }
+                        break;
+                    }
+                }
+
+                var projectName = Path.GetFileNameWithoutExtension(projectPath);
+                var result = new List<PackageModel>(nodes.Count);
+                foreach (var kvp in nodes)
+                {
+                    if (direct.Contains(kvp.Key)) continue;
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var ancestor = FindDirectAncestor(kvp.Key, nodes, direct);
+                    result.Add(new PackageModel
+                    {
+                        PackageId = kvp.Value.Id,
+                        InstalledVersion = kvp.Value.Version,
+                        IsTransitive = true,
+                        RequiredByPackageId = ancestor,
+                        SourceName = projectName,
+                    });
+                }
+
+                return result
+                    .OrderBy(p => p.PackageId, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                await ex.LogAsync();
+                return [];
+            }
+        }
+
+        private sealed class TransitiveNode
+        {
+            public string Id { get; set; } = string.Empty;
+            public NuGetVersion? Version { get; set; }
+            public List<string> Parents { get; } = new();
+        }
+
+        // BFS up the reverse-edge graph until we hit a node that the project
+        // declared directly. Returns null when the package somehow has no
+        // direct ancestor (shouldn't happen for a well-formed assets file).
+        private static string? FindDirectAncestor(
+            string id,
+            Dictionary<string, TransitiveNode> nodes,
+            HashSet<string> direct)
+        {
+            var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { id };
+            var queue = new Queue<string>();
+            queue.Enqueue(id);
+            while (queue.Count > 0)
+            {
+                var cur = queue.Dequeue();
+                if (!nodes.TryGetValue(cur, out var node)) continue;
+                foreach (var parent in node.Parents)
+                {
+                    if (direct.Contains(parent)) return parent;
+                    if (visited.Add(parent)) queue.Enqueue(parent);
+                }
+            }
+            return null;
         }
 
         public async Task InstallPackageAsync(string projectPath, string packageId, NuGetVersion version, CancellationToken cancellationToken)

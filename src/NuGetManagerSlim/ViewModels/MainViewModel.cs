@@ -336,7 +336,20 @@ namespace NuGetManagerSlim.ViewModels
                     var results = await searchTask;
                     var installed = await installedTask;
                     var mru = await mruTask;
-                    ApplyRemoteResults(RankByMru(results, mru), BuildInstalledMap(installed));
+                    ApplyRemoteResults(
+                        MergeInstalledOnTop(installed, RankByMru(results, mru), cleanQuery),
+                        BuildInstalledMap(installed));
+
+                    // Pinned installed rows that the feed search didn't return
+                    // (e.g. when the query doesn't surface them in the top 50)
+                    // arrive without LatestStableVersion, so the update badge
+                    // can't appear. Backfill metadata for those rows in the
+                    // background.
+                    var needsEnrich = _packages
+                        .Where(r => r.IsInstalled && r.LatestStableVersion == null)
+                        .ToList();
+                    if (needsEnrich.Count > 0)
+                        EnrichInstalledMetadataInBackground(needsEnrich);
                 }
                 else
                 {
@@ -409,6 +422,16 @@ namespace NuGetManagerSlim.ViewModels
 
                 EnrichInstalledMetadataInBackground(Packages.ToList());
                 SeedMruFromInstalled(installed);
+
+                // Transitive packages are read from project.assets.json which
+                // can be slow on first cold restore. Kick the load off in the
+                // background so the direct-package list lands immediately;
+                // transitives append to the list once parsed. Skip in the
+                // Updates view since transitives can't be updated through us.
+                if (FilterInstalled && !FilterUpdates)
+                {
+                    LoadTransitivesInBackground(CurrentProject);
+                }
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
@@ -426,6 +449,7 @@ namespace NuGetManagerSlim.ViewModels
         }
 
         private CancellationTokenSource? _enrichCts;
+        private CancellationTokenSource? _transitiveCts;
 
         private void EnrichInstalledMetadataInBackground(IReadOnlyList<PackageRowViewModel> rows)
         {
@@ -449,6 +473,63 @@ namespace NuGetManagerSlim.ViewModels
                 });
                 try { await Task.WhenAll(tasks).ConfigureAwait(false); }
                 catch (OperationCanceledException) { }
+            }, ct);
+        }
+
+        // Reads project.assets.json off the UI thread and appends transitive
+        // rows to the package list. Cancelled if the user toggles scope, picks
+        // a different project, or refreshes before we finish parsing. Browse-
+        // mode results never include transitives, so this only runs in the
+        // Installed view.
+        private void LoadTransitivesInBackground(ProjectScopeModel scope)
+        {
+            var ct = ReplaceCts(ref _transitiveCts);
+
+            _ = Task.Run(async () =>
+            {
+                IReadOnlyList<PackageModel> transitive;
+                try
+                {
+                    transitive = await _projectService.GetTransitivePackagesAsync(scope, ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) { return; }
+                catch (Exception ex) { await ex.LogAsync(); return; }
+
+                if (ct.IsCancellationRequested || transitive == null || transitive.Count == 0) return;
+
+                var query = SearchText?.Trim();
+
+                RunOnUI(() =>
+                {
+                    if (ct.IsCancellationRequested) return;
+                    // Bail if the user switched scope while we were parsing.
+                    if (!FilterInstalled || FilterUpdates) return;
+
+                    var existing = new HashSet<string>(
+                        _packages.Select(p => p.PackageId),
+                        StringComparer.OrdinalIgnoreCase);
+
+                    var newRows = new List<PackageRowViewModel>(transitive.Count);
+                    foreach (var pkg in transitive)
+                    {
+                        if (existing.Contains(pkg.PackageId)) continue;
+                        var row = new PackageRowViewModel(pkg);
+                        if (!string.IsNullOrEmpty(query)
+                            && row.PackageId.IndexOf(query, StringComparison.OrdinalIgnoreCase) < 0)
+                        {
+                            row.IsLocallyVisible = false;
+                        }
+                        _packages.Add(row);
+                        newRows.Add(row);
+                    }
+
+                    if (newRows.Count > 0)
+                    {
+                        OnPropertyChanged(nameof(HasPackages));
+                        OnPropertyChanged(nameof(IsEmptyState));
+                        EnrichInstalledMetadataInBackground(newRows);
+                    }
+                });
             }, ct);
         }
 
@@ -523,6 +604,65 @@ namespace NuGetManagerSlim.ViewModels
             ranked.AddRange(promoted);
             ranked.AddRange(rest);
             return ranked;
+        }
+
+        // Pins installed packages to the top of the Browse list. When the user
+        // is searching, only installed packages whose id matches the query are
+        // pinned (so the list still narrows). The remote model is preferred
+        // when both sides know about the package (it carries LatestStableVersion
+        // for the update badge); otherwise we fall back to the installed
+        // PackageModel and let metadata enrichment fill in the latest version
+        // asynchronously.
+        public static IReadOnlyList<PackageModel> MergeInstalledOnTop(
+            IReadOnlyList<PackageModel> installed,
+            IReadOnlyList<PackageModel> remote,
+            string? query)
+        {
+            if (installed == null || installed.Count == 0)
+                return remote ?? Array.Empty<PackageModel>();
+
+            var trimmed = query?.Trim();
+            var hasQuery = !string.IsNullOrEmpty(trimmed);
+
+            var remoteById = new Dictionary<string, PackageModel>(StringComparer.OrdinalIgnoreCase);
+            if (remote != null)
+            {
+                foreach (var r in remote)
+                {
+                    if (string.IsNullOrEmpty(r.PackageId)) continue;
+                    if (!remoteById.ContainsKey(r.PackageId))
+                        remoteById[r.PackageId] = r;
+                }
+            }
+
+            var pinnedIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var pinned = new List<PackageModel>();
+            foreach (var p in installed)
+            {
+                if (p.IsTransitive) continue;
+                if (string.IsNullOrEmpty(p.PackageId)) continue;
+                if (p.InstalledVersion == null) continue;
+                if (hasQuery && p.PackageId.IndexOf(trimmed!, StringComparison.OrdinalIgnoreCase) < 0)
+                    continue;
+                if (!pinnedIds.Add(p.PackageId)) continue;
+
+                pinned.Add(remoteById.TryGetValue(p.PackageId, out var rich) ? rich : p);
+            }
+
+            var rest = new List<PackageModel>(remote?.Count ?? 0);
+            if (remote != null)
+            {
+                foreach (var r in remote)
+                {
+                    if (!pinnedIds.Contains(r.PackageId))
+                        rest.Add(r);
+                }
+            }
+
+            var combined = new List<PackageModel>(pinned.Count + rest.Count);
+            combined.AddRange(pinned);
+            combined.AddRange(rest);
+            return combined;
         }
 
         private static Dictionary<string, PackageModel> BuildInstalledMap(IReadOnlyList<PackageModel> installed)
@@ -824,6 +964,8 @@ namespace NuGetManagerSlim.ViewModels
             _operationCts?.Dispose();
             _enrichCts?.Cancel();
             _enrichCts?.Dispose();
+            _transitiveCts?.Cancel();
+            _transitiveCts?.Dispose();
             _debounceTimer?.Dispose();
             _debounceTimer = null;
             _restoreMonitor.RestoreStatusChanged -= OnRestoreStatusChanged;
