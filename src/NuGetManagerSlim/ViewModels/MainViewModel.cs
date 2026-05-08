@@ -160,6 +160,18 @@ namespace NuGetManagerSlim.ViewModels
             return fresh.Token;
         }
 
+        // Cancels and disposes the existing CTS without allocating a replacement.
+        // Used when we want to abort an in-flight operation but aren't starting
+        // a sibling operation on the same CTS slot.
+        private static void CancelCts(ref CancellationTokenSource? cts)
+        {
+            var old = cts;
+            cts = null;
+            if (old == null) return;
+            try { old.Cancel(); } catch (ObjectDisposedException) { }
+            old.Dispose();
+        }
+
         // Marshals an action to the UI thread using the most reliable channel
         // available. Used by the debounce timer (System.Timers.Timer fires on
         // a threadpool thread) and the metadata-enrichment fan-out.
@@ -506,7 +518,7 @@ namespace NuGetManagerSlim.ViewModels
             return (stripped, sources.Count == 0 ? null : sources);
         }
 
-        private async Task ApplyFiltersAsync(CancellationToken cancellationToken = default)
+        private async Task ApplyFiltersAsync(CancellationToken cancellationToken = default, bool forceRemoteUpdateFetch = false)
         {
             if (CurrentProject == null) return;
 
@@ -527,20 +539,28 @@ namespace NuGetManagerSlim.ViewModels
                 {
                     // HasUpdate depends on LatestStableVersion which is normally
                     // populated asynchronously by EnrichInstalledMetadataInBackground.
-                    // In the Updates view we have to know latest versions up front,
-                    // so first apply any cached "latest" metadata (warm-session
-                    // switches become near-instant) and only fan out network
-                    // fetches for the rows that haven't been enriched yet.
-                    var rowsNeedingFetch = new List<PackageRowViewModel>(rows.Count);
+                    // Switching into the Updates view should feel instant: the
+                    // update badge is already visible on rows that have updates
+                    // (cached "latest" metadata was populated as a side effect
+                    // of prior enrichment), so we just apply any cached "latest"
+                    // metadata here and filter to rows that already report an
+                    // available update. Rows without cached metadata are simply
+                    // omitted - if the user wants to break through caching and
+                    // fetch fresh metadata for everything, they can hit the
+                    // Refresh button which invalidates the cache and reloads.
                     foreach (var row in rows)
                     {
                         if (_feedService.TryGetCachedLatestMetadata(row.PackageId, out var cachedMeta) && cachedMeta != null)
                             row.ApplyMetadata(cachedMeta);
-                        else
-                            rowsNeedingFetch.Add(row);
                     }
-                    if (rowsNeedingFetch.Count > 0)
-                        await EnrichRowsAsync(rowsNeedingFetch, cancellationToken).ConfigureAwait(true);
+
+                    if (forceRemoteUpdateFetch)
+                    {
+                        var rowsNeedingFetch = rows.Where(r => r.LatestStableVersion == null).ToList();
+                        if (rowsNeedingFetch.Count > 0)
+                            await EnrichRowsAsync(rowsNeedingFetch, cancellationToken).ConfigureAwait(true);
+                    }
+
                     rows = rows.Where(r => r.HasUpdate).ToList();
                 }
 
@@ -922,24 +942,39 @@ namespace NuGetManagerSlim.ViewModels
         private async Task RefreshAsync()
         {
             // User-initiated Refresh: drop cached search results so the next
-            // query goes back to the feed, then reload.
+            // query goes back to the feed, then reload. In the Updates view
+            // this also forces a fresh fetch of latest metadata for every
+            // installed package so the user can break through caching.
             _feedService.InvalidateCache();
             OperationLog.Clear();
-            await ReloadPackagesAsync();
+            await ReloadPackagesAsync(forceRemoteUpdateFetch: true);
         }
 
-        public async Task ReloadPackagesAsync()
+        public async Task ReloadPackagesAsync(bool forceRemoteUpdateFetch = false)
         {
             // Re-load packages using the current scope, view-mode and search.
             try
             {
                 if (FilterInstalled || FilterUpdates)
                 {
+                    // Cancel any in-flight remote search so a stale browse load
+                    // can't land on top of the filtered list we're about to build.
+                    CancelCts(ref _searchCts);
                     var ct = ReplaceCts(ref _filterCts);
-                    await ApplyFiltersAsync(ct);
+                    await ApplyFiltersAsync(ct, forceRemoteUpdateFetch);
                 }
                 else
                 {
+                    // Cancel any in-flight installed/updates load so its
+                    // ReplaceAll can't overwrite the browse results we're
+                    // about to render. This matters when the user flips from
+                    // Updates to All packages: the ViewMode setter clears
+                    // FilterUpdates first (which kicks off ApplyFiltersAsync
+                    // for the still-true FilterInstalled state) and then
+                    // clears FilterInstalled (which lands us here). Without
+                    // cancelling, the filter task can finish after the search
+                    // and wipe out the online results.
+                    CancelCts(ref _filterCts);
                     await SearchRemoteAsync();
                 }
             }

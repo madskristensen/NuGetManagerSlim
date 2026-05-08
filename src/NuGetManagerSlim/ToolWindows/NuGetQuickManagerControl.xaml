@@ -250,7 +250,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="180" MinHeight="100" MaxHeight="350" />
+            <RowDefinition x:Name="DetailRow" Height="180" MinHeight="100" MaxHeight="350" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
@@ -605,9 +605,10 @@
         </Grid>
 
         <!-- Splitter between list and detail -->
-        <GridSplitter Grid.Row="1" Height="4" HorizontalAlignment="Stretch"
+        <GridSplitter x:Name="DetailSplitter" Grid.Row="1" Height="4" HorizontalAlignment="Stretch"
                       Background="{DynamicResource {x:Static vsui:EnvironmentColors.PanelSeparatorBrushKey}}"
-                      ShowsPreview="True" />
+                      ShowsPreview="True"
+                      Visibility="{Binding HasDetailPane, Converter={StaticResource BoolToVis}}" />
 
         <!-- F: Detail pane -->
         <Border Grid.Row="2" BorderThickness="0,1,0,1"

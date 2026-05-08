@@ -18,7 +18,7 @@
       <Menu guid="NuGetManagerSlim" id="ViewModeMenuController" priority="0x0150" type="MenuController">
         <Parent guid="NuGetManagerSlim" id="NuGetQuickManagerToolbarGroup" />
         <Strings>
-          <ButtonText>Browse</ButtonText>
+          <ButtonText>All packages</ButtonText>
           <CommandName>View mode</CommandName>
         </Strings>
       </Menu>
@@ -45,8 +45,8 @@
         <Icon guid="ImageCatalogGuid" id="NuGet" />
         <CommandFlag>IconIsMoniker</CommandFlag>
         <Strings>
-          <ButtonText>Browse</ButtonText>
-          <ToolTipText>Browse packages from your enabled sources</ToolTipText>
+          <ButtonText>All packages</ButtonText>
+          <ToolTipText>Show all packages from your enabled sources</ToolTipText>
         </Strings>
       </Button>
 

@@ -10,10 +10,18 @@ namespace NuGetManagerSlim.ToolWindows
     {
         private readonly MainViewModel _viewModel;
 
+        // Remembers the user's last splitter-resized detail-pane height so we
+        // can restore it after the pane was hidden (no selection) and shown
+        // again. Falls back to the XAML-default GridLength on first show.
+        private GridLength _lastDetailRowHeight;
+        private GridLength _lastDetailRowMaxHeight;
+
         public NuGetQuickManagerControl(MainViewModel viewModel)
         {
             InitializeComponent();
             _viewModel = viewModel;
+            _lastDetailRowHeight = DetailRow.Height;
+            _lastDetailRowMaxHeight = new GridLength(DetailRow.MaxHeight);
             // The control's ctor runs on the WPF UI thread, so this is the
             // canonical place to give the VM a deterministic dispatcher.
             viewModel.AttachDispatcher(Dispatcher);
@@ -24,6 +32,8 @@ namespace NuGetManagerSlim.ToolWindows
             // pane retains the previous package's scroll offset and may open
             // mid-dependency-list.
             viewModel.PropertyChanged += OnViewModelPropertyChanged;
+
+            ApplyDetailPaneVisibility(viewModel.HasDetailPane);
 
             // Group rows by GroupKey so transitive packages render under a
             // dedicated "Transitive packages" header. The header for the
@@ -49,6 +59,40 @@ namespace NuGetManagerSlim.ToolWindows
                 // switches projects so the new project's list is read from
                 // the top instead of inheriting the previous list's offset.
                 ScrollPackageListToTop();
+            }
+            else if (e.PropertyName == nameof(MainViewModel.HasDetailPane)
+                  || e.PropertyName == nameof(MainViewModel.HasSelectedPackage)
+                  || e.PropertyName == nameof(MainViewModel.HasMultiSelection))
+            {
+                ApplyDetailPaneVisibility(_viewModel.HasDetailPane);
+            }
+        }
+
+        // Toggles the detail row's grid height alongside the Border's
+        // Visibility binding. Without this the row would still reserve its
+        // 180px even when no package is selected.
+        private void ApplyDetailPaneVisibility(bool hasDetail)
+        {
+            if (hasDetail)
+            {
+                if (DetailRow.Height.Value <= 0)
+                {
+                    DetailRow.MinHeight = 100;
+                    DetailRow.MaxHeight = _lastDetailRowMaxHeight.Value;
+                    DetailRow.Height = _lastDetailRowHeight.Value > 0
+                        ? _lastDetailRowHeight
+                        : new GridLength(180);
+                }
+            }
+            else
+            {
+                if (DetailRow.Height.Value > 0)
+                {
+                    _lastDetailRowHeight = DetailRow.Height;
+                }
+                DetailRow.MinHeight = 0;
+                DetailRow.MaxHeight = 0;
+                DetailRow.Height = new GridLength(0);
             }
         }
 
