@@ -8,6 +8,7 @@ using System.Xml.Linq;
 using EnvDTE;
 using Microsoft.VisualStudio.ComponentModelHost;
 using Microsoft.VisualStudio.Shell;
+using Microsoft.VisualStudio.Threading;
 using NuGet.Versioning;
 using NuGet.VisualStudio;
 using NuGetManagerSlim.Models;
@@ -34,10 +35,19 @@ namespace NuGetManagerSlim.Services
                 if (scope == null || string.IsNullOrEmpty(scope.ProjectFullPath))
                     return [];
 
-                var byId = new Dictionary<string, PackageModel>(StringComparer.OrdinalIgnoreCase);
+                // The project file is parsed with synchronous XDocument.Load, which
+                // would otherwise stall the UI thread on every filter toggle / project
+                // switch. Hop to the threadpool via JTF so the I/O + parse runs off
+                // the dispatcher.
+                await TaskScheduler.Default;
+
+                var projectPath = scope.ProjectFullPath!;
                 cancellationToken.ThrowIfCancellationRequested();
-                foreach (var pkg in ReadInstalledFromProject(scope.ProjectFullPath!))
+
+                var byId = new Dictionary<string, PackageModel>(StringComparer.OrdinalIgnoreCase);
+                foreach (var pkg in ReadInstalledFromProject(projectPath))
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     if (!byId.ContainsKey(pkg.PackageId))
                     {
                         byId[pkg.PackageId] = pkg;

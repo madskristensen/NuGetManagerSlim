@@ -12,6 +12,9 @@ namespace NuGetManagerSlim.ToolWindows
         {
             InitializeComponent();
             _viewModel = viewModel;
+            // The control's ctor runs on the WPF UI thread, so this is the
+            // canonical place to give the VM a deterministic dispatcher.
+            viewModel.AttachDispatcher(Dispatcher);
             DataContext = viewModel;
         }
 
@@ -23,23 +26,15 @@ namespace NuGetManagerSlim.ToolWindows
 
         private void PackageIcon_ImageFailed(object sender, ExceptionRoutedEventArgs e)
         {
-            if (sender is Image image)
+            // Late-stage WPF decode failure (rare - the IconCacheService
+            // already filters out null results). Flip HasIcon on the row VM
+            // so the placeholder reappears and the failure survives container
+            // recycling under virtualization. Manipulating the visual tree
+            // directly (the previous behavior) was lost the moment the row
+            // scrolled out of view.
+            if (sender is Image image && image.DataContext is ViewModels.PackageRowViewModel row)
             {
-                image.Visibility = Visibility.Collapsed;
-
-                // Restore the placeholder CrispImage in the same Grid; the
-                // DataTrigger collapsed it because HasIcon is true based on
-                // IconUrl alone, which can't tell us the bitmap failed to load.
-                if (image.Parent is Panel parent)
-                {
-                    foreach (var child in parent.Children)
-                    {
-                        if (child is Microsoft.VisualStudio.Imaging.CrispImage placeholder)
-                        {
-                            placeholder.Visibility = Visibility.Visible;
-                        }
-                    }
-                }
+                row.MarkIconFailed();
             }
         }
     }

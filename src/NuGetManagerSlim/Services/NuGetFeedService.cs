@@ -184,6 +184,7 @@ namespace NuGetManagerSlim.Services
             lock (_searchCacheLock) _searchCache.Clear();
             lock (_metadataCacheLock) _metadataCache.Clear();
             lock (_versionsCacheLock) _versionsCache.Clear();
+            lock (_sourcesCacheLock) _enabledSourcesCache = null;
             System.Threading.Interlocked.Exchange(ref _bypassNextNetworkFetch, 1);
         }
 
@@ -210,16 +211,23 @@ namespace NuGetManagerSlim.Services
 
             // Fan out to all enabled sources in parallel and race each against a
             // soft 2.5s deadline. A slow / dead feed no longer blocks the healthy
-            // ones - we surface whatever returned in time.
+            // ones - we surface whatever returned in time, then keep the slow
+            // ones alive so their results can backfill the cache.
             var perSourceTimeout = TimeSpan.FromMilliseconds(2500);
-            using var perCallCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            var perCallCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             var sourceTasks = sources
                 .Select(src => RunSourceSearchAsync(src, query, includePrerelease, skip, take, perCallCts.Token))
                 .ToArray();
 
             var completed = Task.WhenAll(sourceTasks);
-            var timeout = Task.Delay(perSourceTimeout, cancellationToken);
+
+            // Dedicated timeout CTS so the timer is released the moment the
+            // fan-out wins (instead of leaking until the outer token fires).
+            using var timeoutCts = new CancellationTokenSource();
+            using var linkedTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
+            var timeout = Task.Delay(perSourceTimeout, linkedTimeoutCts.Token);
             await Task.WhenAny(completed, timeout).ConfigureAwait(false);
+            timeoutCts.Cancel();
 
             for (var i = 0; i < sourceTasks.Length; i++)
             {
@@ -228,15 +236,53 @@ namespace NuGetManagerSlim.Services
                     results.AddRange(t.Result);
             }
 
-            // Let any still-running source tasks finish silently in the background
-            // so their results land in the next cache fill, but don't await them.
-            _ = completed.ContinueWith(_ => { /* observe to avoid UnobservedTaskException */ }, TaskScheduler.Default);
-
             var deduped = results
                 .GroupBy(p => p.PackageId, StringComparer.OrdinalIgnoreCase)
                 .Select(g => g.First())
                 .ToList();
             StoreCachedSearch(cacheKey, deduped);
+
+            // Backfill: when a slow source eventually returns, merge its
+            // results with the partial set already cached and rewrite the
+            // entry so the next keystroke gets the full picture without a
+            // second network round-trip. If the outer search was cancelled
+            // we cancel the in-flight requests instead of letting them run.
+            _ = completed.ContinueWith(t =>
+            {
+                try
+                {
+                    if (cancellationToken.IsCancellationRequested)
+                    {
+                        perCallCts.Cancel();
+                        return;
+                    }
+
+                    if (t.Status != TaskStatus.RanToCompletion) return;
+
+                    var merged = new List<PackageModel>(deduped);
+                    var have = new HashSet<string>(deduped.Select(p => p.PackageId), StringComparer.OrdinalIgnoreCase);
+                    var addedLate = false;
+                    foreach (var list in t.Result)
+                    {
+                        if (list == null) continue;
+                        foreach (var p in list)
+                        {
+                            if (have.Add(p.PackageId))
+                            {
+                                merged.Add(p);
+                                addedLate = true;
+                            }
+                        }
+                    }
+                    if (addedLate)
+                        StoreCachedSearch(cacheKey, merged);
+                }
+                finally
+                {
+                    perCallCts.Dispose();
+                }
+            }, TaskScheduler.Default);
+
             return deduped;
         }
 
@@ -476,10 +522,17 @@ namespace NuGetManagerSlim.Services
                     if (resource == null) continue;
 
                     var versions = await resource.GetAllVersionsAsync(packageId, _cacheContext, _logger, cancellationToken).ConfigureAwait(false);
-                    return versions
+
+                    // A source that doesn't host this package returns an empty
+                    // sequence rather than throwing; fall through to the next
+                    // source instead of returning an empty list as the answer.
+                    if (versions == null) continue;
+                    var filtered = versions
                         .Where(v => includePrerelease || !v.IsPrerelease)
                         .OrderByDescending(v => v)
                         .ToList();
+                    if (filtered.Count == 0) continue;
+                    return filtered;
                 }
                 catch (OperationCanceledException)
                 {
@@ -519,20 +572,37 @@ namespace NuGetManagerSlim.Services
 
         private static IReadOnlyList<PackageSourceModel> GetEnabledSources()
         {
-            try
+            var cached = _enabledSourcesCache;
+            if (cached != null) return cached;
+
+            lock (_sourcesCacheLock)
             {
-                var settings = Settings.LoadDefaultSettings(root: null);
-                var provider = new PackageSourceProvider(settings);
-                return provider.LoadPackageSources()
-                    .Where(s => s.IsEnabled)
-                    .Select(s => new PackageSourceModel { Name = s.Name, Source = s.Source, IsEnabled = true })
-                    .ToList();
-            }
-            catch
-            {
-                return [new PackageSourceModel { Name = "nuget.org", Source = "https://api.nuget.org/v3/index.json", IsEnabled = true }];
+                if (_enabledSourcesCache != null) return _enabledSourcesCache;
+
+                try
+                {
+                    var settings = Settings.LoadDefaultSettings(root: null);
+                    var provider = new PackageSourceProvider(settings);
+                    _enabledSourcesCache = provider.LoadPackageSources()
+                        .Where(s => s.IsEnabled)
+                        .Select(s => new PackageSourceModel { Name = s.Name, Source = s.Source, IsEnabled = true })
+                        .ToList();
+                }
+                catch
+                {
+                    _enabledSourcesCache = [new PackageSourceModel { Name = "nuget.org", Source = "https://api.nuget.org/v3/index.json", IsEnabled = true }];
+                }
+
+                return _enabledSourcesCache;
             }
         }
+
+        // Cached enabled-sources snapshot. NuGet.config rarely changes mid-session,
+        // and this list was previously re-read from disk on every search, every
+        // metadata fetch, and every per-package enrichment fan-out (so 50+ disk
+        // reads per keystroke during a Browse search).
+        private static IReadOnlyList<PackageSourceModel>? _enabledSourcesCache;
+        private static readonly object _sourcesCacheLock = new();
 
         public void Dispose() => _cacheContext.Dispose();
     }

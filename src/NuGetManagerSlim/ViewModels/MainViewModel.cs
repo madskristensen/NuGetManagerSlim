@@ -48,6 +48,18 @@ namespace NuGetManagerSlim.ViewModels
         private System.Timers.Timer? _debounceTimer;
         private readonly List<string> _searchHistory = [];
         private int _searchHistoryIndex = -1;
+
+        // Marshals collection mutations and PropertyChanged callbacks from
+        // background threads onto the WPF UI thread. Prefer a Dispatcher
+        // explicitly attached by the host UserControl (guaranteed to be the
+        // right one); fall back to Application.Current.Dispatcher when hosted
+        // in a WPF app, and finally to the SynchronizationContext captured at
+        // construction time so unit tests still observe synchronous-ish
+        // behavior. SynchronizationContext.Current alone is unreliable here:
+        // the VM may be constructed off the UI thread by BaseToolWindow's
+        // async pane factory, in which case it would be null.
+        private System.Windows.Threading.Dispatcher? _dispatcher
+            = System.Windows.Application.Current?.Dispatcher;
         private readonly SynchronizationContext? _uiContext = SynchronizationContext.Current;
 
         [ObservableProperty] private string _searchText = string.Empty;
@@ -114,6 +126,69 @@ namespace NuGetManagerSlim.ViewModels
             _debounceTimer.Elapsed += OnDebounceElapsed;
 
             _restoreMonitor.RestoreStatusChanged += OnRestoreStatusChanged;
+        }
+
+        // Called by the hosting UserControl on the WPF UI thread to give the
+        // view model a deterministic dispatcher for cross-thread marshaling.
+        public void AttachDispatcher(System.Windows.Threading.Dispatcher dispatcher)
+        {
+            if (dispatcher == null) return;
+            _dispatcher = dispatcher;
+        }
+
+        // Cancels and disposes the existing CTS, then assigns a fresh one.
+        // Cancel-and-replace without dispose was leaking a small native handle
+        // every keystroke / selection change.
+        private static CancellationToken ReplaceCts(ref CancellationTokenSource? cts)
+        {
+            var old = cts;
+            var fresh = new CancellationTokenSource();
+            cts = fresh;
+            if (old != null)
+            {
+                try { old.Cancel(); } catch (ObjectDisposedException) { }
+                old.Dispose();
+            }
+            return fresh.Token;
+        }
+
+        // Marshals an action to the UI thread using the most reliable channel
+        // available. Used by the debounce timer (System.Timers.Timer fires on
+        // a threadpool thread) and the metadata-enrichment fan-out.
+        private void RunOnUI(Action action)
+        {
+            if (action == null) return;
+
+            var dispatcher = _dispatcher ?? System.Windows.Application.Current?.Dispatcher;
+            if (dispatcher != null)
+            {
+                if (dispatcher.CheckAccess())
+                {
+                    action();
+                }
+                else
+                {
+                    // Dispatcher.BeginInvoke is the right primitive here: we
+                    // intentionally fire-and-forget onto the UI thread and the
+                    // returned DispatcherOperation has nothing useful for us.
+                    // VSTHRD001 prefers JTF, but this VM is unit-tested without
+                    // the VS shell, so we keep the WPF primitive.
+#pragma warning disable VSTHRD001, VSTHRD110
+                    _ = dispatcher.BeginInvoke(action);
+#pragma warning restore VSTHRD001, VSTHRD110
+                }
+                return;
+            }
+
+            if (_uiContext != null)
+            {
+#pragma warning disable VSTHRD001
+                _uiContext.Post(_ => action(), null);
+#pragma warning restore VSTHRD001
+                return;
+            }
+
+            action();
         }
 
         public async Task InitializeAsync(CancellationToken cancellationToken)
@@ -227,29 +302,17 @@ namespace NuGetManagerSlim.ViewModels
 
         private void OnDebounceElapsed(object? sender, System.Timers.ElapsedEventArgs e)
         {
-            if (_uiContext != null)
-            {
-                // Marshal to the WPF UI thread captured at construction so that
-                // collection updates inside SearchRemoteAsync run on the UI thread.
-                // We intentionally use SynchronizationContext rather than JoinableTaskFactory
-                // because this VM is unit-tested without the VS shell.
-#pragma warning disable VSTHRD001
-                _uiContext.Post(_ => _ = SearchRemoteAsync(), null);
-#pragma warning restore VSTHRD001
-            }
-            else
-            {
-                _ = SearchRemoteAsync();
-            }
+            // System.Timers.Timer fires on a threadpool thread; marshal to the
+            // WPF UI thread so collection updates inside SearchRemoteAsync run
+            // where the bound ObservableCollection lives.
+            RunOnUI(() => _ = SearchRemoteAsync());
         }
 
         private async Task SearchRemoteAsync()
         {
             var query = SearchText;
 
-            _searchCts?.Cancel();
-            _searchCts = new CancellationTokenSource();
-            var ct = _searchCts.Token;
+            var ct = ReplaceCts(ref _searchCts);
 
             var (cleanQuery, sourceFilter) = ExtractSourceFilter(query);
 
@@ -366,10 +429,7 @@ namespace NuGetManagerSlim.ViewModels
 
         private void EnrichInstalledMetadataInBackground(IReadOnlyList<PackageRowViewModel> rows)
         {
-            _enrichCts?.Cancel();
-            _enrichCts = new CancellationTokenSource();
-            var ct = _enrichCts.Token;
-            var ctx = _uiContext;
+            var ct = ReplaceCts(ref _enrichCts);
 
             _ = Task.Run(async () =>
             {
@@ -381,16 +441,7 @@ namespace NuGetManagerSlim.ViewModels
                     {
                         var meta = await _feedService.GetPackageMetadataAsync(row.PackageId, ct).ConfigureAwait(false);
                         if (meta == null || ct.IsCancellationRequested) return;
-                        if (ctx != null)
-                        {
-#pragma warning disable VSTHRD001
-                            ctx.Post(_ => row.ApplyMetadata(meta), null);
-#pragma warning restore VSTHRD001
-                        }
-                        else
-                        {
-                            row.ApplyMetadata(meta);
-                        }
+                        RunOnUI(() => row.ApplyMetadata(meta));
                     }
                     catch (OperationCanceledException) { }
                     catch (Exception ex) { await ex.LogAsync(); }
@@ -533,8 +584,12 @@ namespace NuGetManagerSlim.ViewModels
 
         private async Task LoadDetailAsync(PackageRowViewModel row)
         {
-            _operationCts?.Cancel();
-            _operationCts = new CancellationTokenSource();
+            // Capture the token from this load attempt so that if the user
+            // selects another row mid-flight (which calls ReplaceCts on
+            // _operationCts), we don't overwrite Detail with the loser's
+            // result. ct.IsCancellationRequested becomes true the moment a
+            // newer LoadDetailAsync replaces the CTS.
+            var ct = ReplaceCts(ref _operationCts);
 
             var detail = new PackageDetailViewModel(_feedService, _projectService, msg =>
             {
@@ -545,7 +600,8 @@ namespace NuGetManagerSlim.ViewModels
             try
             {
                 if (CurrentProject == null) return;
-                await detail.LoadAsync(row, CurrentProject, FilterPrerelease, _operationCts.Token);
+                await detail.LoadAsync(row, CurrentProject, FilterPrerelease, ct);
+                if (ct.IsCancellationRequested) return;
                 Detail = detail;
             }
             catch (OperationCanceledException) { }

@@ -360,10 +360,13 @@
                                            Style="{StaticResource MutedTextStyle}" Margin="8,0,0,0" />
                             </StackPanel>
 
-                            <!-- Quick action: install (when not installed) or update (when update available).
-                                 Only visible when the row is hovered or selected. -->
+                            <!-- Quick action area. The update button is always visible when an
+                                 update is available (so users can spot updateable packages at a
+                                 glance) while install / uninstall remain hover-only to keep the
+                                 row visually quiet at rest. -->
                             <StackPanel Grid.Column="2" Grid.RowSpan="2" Orientation="Horizontal"
                                         VerticalAlignment="Center" Margin="4,0,4,0">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                 <StackPanel.Style>
                                     <Style TargetType="StackPanel">
                                         <Setter Property="Visibility" Value="Hidden" />
@@ -442,27 +445,6 @@
                                     <imaging:CrispImage Width="16" Height="16"
                                                         Moniker="{x:Static catalog:KnownMonikers.CloudDownload}" />
                                 </Button>
-                                <Button Command="{Binding DataContext.QuickUpdateCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
-                                        CommandParameter="{Binding}"
-                                        ToolTip="Update to latest version"
-                                        AutomationProperties.Name="{Binding UpdateButtonAccessibleName}">
-                                    <Button.Style>
-                                        <Style TargetType="Button" BasedOn="{StaticResource IconButtonStyle}">
-                                            <Setter Property="Visibility" Value="Collapsed" />
-                                            <Style.Triggers>
-                                                <MultiDataTrigger>
-                                                    <MultiDataTrigger.Conditions>
-                                                        <Condition Binding="{Binding HasUpdate}" Value="True" />
-                                                        <Condition Binding="{Binding IsOperationInProgress}" Value="False" />
-                                                    </MultiDataTrigger.Conditions>
-                                                    <Setter Property="Visibility" Value="Visible" />
-                                                </MultiDataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </Button.Style>
-                                    <imaging:CrispImage Width="16" Height="16"
-                                                        Moniker="{x:Static catalog:KnownMonikers.StatusUpdateAvailable}" />
-                                </Button>
                                 <Button Command="{Binding DataContext.QuickUninstallCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
                                         CommandParameter="{Binding}"
                                         ToolTip="Uninstall package"
@@ -483,6 +465,33 @@
                                     </Button.Style>
                                     <imaging:CrispImage Width="16" Height="16"
                                                         Moniker="{x:Static catalog:KnownMonikers.Remove}" />
+                                </Button>
+                                </StackPanel>
+
+                                <!-- Always-visible update affordance. Doubles as a status badge so the
+                                     row reads as 'has update' even when not hovered, and as a one-click
+                                     update target when the user does hover. Hidden during an in-flight
+                                     operation so the spinner in the hover zone owns the visual state. -->
+                                <Button Command="{Binding DataContext.QuickUpdateCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                        CommandParameter="{Binding}"
+                                        ToolTip="Update to latest version"
+                                        AutomationProperties.Name="{Binding UpdateButtonAccessibleName}">
+                                    <Button.Style>
+                                        <Style TargetType="Button" BasedOn="{StaticResource IconButtonStyle}">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                            <Style.Triggers>
+                                                <MultiDataTrigger>
+                                                    <MultiDataTrigger.Conditions>
+                                                        <Condition Binding="{Binding HasUpdate}" Value="True" />
+                                                        <Condition Binding="{Binding IsOperationInProgress}" Value="False" />
+                                                    </MultiDataTrigger.Conditions>
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                </MultiDataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
+                                    <imaging:CrispImage Width="16" Height="16"
+                                                        Moniker="{x:Static catalog:KnownMonikers.StatusUpdateAvailable}" />
                                 </Button>
                             </StackPanel>
                         </Grid>

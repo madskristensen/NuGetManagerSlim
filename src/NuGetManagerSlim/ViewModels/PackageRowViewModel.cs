@@ -32,6 +32,7 @@ namespace NuGetManagerSlim.ViewModels
             {
                 _iconUrlOverride = metadata.IconUrl;
                 _iconRequested = false;
+                _iconFailed = false;
                 _icon = null;
                 OnPropertyChanged(nameof(IconUrl));
                 OnPropertyChanged(nameof(HasIcon));
@@ -104,13 +105,19 @@ namespace NuGetManagerSlim.ViewModels
 
         public string? IconUrl => _iconUrlOverride ?? _model.IconUrl;
 
-        public bool HasIcon => !string.IsNullOrEmpty(IconUrl);
+        // True when we have an icon URL and the load hasn't yet been proven
+        // to fail. Some packages publish an IconUrl that resolves to empty
+        // bytes, 404s, or non-image content (HTML error pages, embedded
+        // .nupkg paths). Without this flag we'd collapse the placeholder
+        // and then render an empty Image element in its place.
+        public bool HasIcon => !_iconFailed && !string.IsNullOrEmpty(IconUrl);
 
         // Decoded-once, frozen, display-sized BitmapImage. Bound directly to the
         // Image control in the row template so WPF doesn't re-decode the source
         // bytes for every recycled container.
         private ImageSource? _icon;
         private bool _iconRequested;
+        private bool _iconFailed;
         public ImageSource? Icon
         {
             get
@@ -134,6 +141,22 @@ namespace NuGetManagerSlim.ViewModels
                 _icon = image;
                 OnPropertyChanged(nameof(Icon));
             }
+            else
+            {
+                MarkIconFailed();
+            }
+        }
+
+        // Called when icon resolution fails (cache returned null or the WPF
+        // Image control raised ImageFailed). Flips HasIcon to false so the
+        // placeholder takes over and survives ItemsControl virtualization.
+        public void MarkIconFailed()
+        {
+            if (_iconFailed) return;
+            _iconFailed = true;
+            _icon = null;
+            OnPropertyChanged(nameof(HasIcon));
+            OnPropertyChanged(nameof(Icon));
         }
 
         public bool CanQuickInstall => !IsInstalled

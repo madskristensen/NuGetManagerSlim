@@ -70,7 +70,8 @@ namespace NuGetManagerSlim.Services
                 byte[]? bytes = null;
                 if (File.Exists(path))
                 {
-                    try { bytes = File.ReadAllBytes(path); } catch { bytes = null; }
+                    try { bytes = await ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false); }
+                    catch { bytes = null; }
                 }
 
                 if (bytes == null || bytes.Length == 0)
@@ -81,7 +82,7 @@ namespace NuGetManagerSlim.Services
                         try
                         {
                             Directory.CreateDirectory(_cacheDir);
-                            File.WriteAllBytes(path, bytes);
+                            await WriteAllBytesAsync(path, bytes, cancellationToken).ConfigureAwait(false);
                         }
                         catch (Exception ex) { await ex.LogAsync(); }
                     }
@@ -106,6 +107,26 @@ namespace NuGetManagerSlim.Services
                 }
                 return null;
             }
+        }
+
+        // .NET Framework 4.8 doesn't ship File.ReadAllBytesAsync / WriteAllBytesAsync,
+        // so we use FileStream with useAsync: true to get true overlapped I/O.
+        private static async Task<byte[]> ReadAllBytesAsync(string path, CancellationToken cancellationToken)
+        {
+            using var stream = new FileStream(
+                path, FileMode.Open, FileAccess.Read, FileShare.Read,
+                bufferSize: 4096, useAsync: true);
+            using var ms = new MemoryStream(capacity: (int)Math.Min(stream.Length, int.MaxValue));
+            await stream.CopyToAsync(ms, 81920, cancellationToken).ConfigureAwait(false);
+            return ms.ToArray();
+        }
+
+        private static async Task WriteAllBytesAsync(string path, byte[] bytes, CancellationToken cancellationToken)
+        {
+            using var stream = new FileStream(
+                path, FileMode.Create, FileAccess.Write, FileShare.None,
+                bufferSize: 4096, useAsync: true);
+            await stream.WriteAsync(bytes, 0, bytes.Length, cancellationToken).ConfigureAwait(false);
         }
 
         private static ImageSource? Decode(byte[] bytes)
