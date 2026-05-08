@@ -383,11 +383,12 @@
                                            Visibility="{Binding IsPrerelease, Converter={StaticResource BoolToVis}}" />
                             </StackPanel>
 
-                            <!-- Version + author. The update arrow icon in the action area
-                                 already signals that a newer version is available, so we don't
-                                 repeat that information inline here. -->
+                            <!-- Downloads + author. The update arrow icon in the action area
+                                 already signals that a newer version is available, and the
+                                 selected row's detail pane shows the precise versions, so we
+                                 use this row for popularity context instead. -->
                             <StackPanel Grid.Column="1" Grid.Row="1" Orientation="Horizontal" Margin="8,1,0,0">
-                                <TextBlock Text="{Binding InstalledVersionDisplay}"
+                                <TextBlock Text="{Binding DownloadCountDisplay}"
                                            Style="{StaticResource MutedTextStyle}" />
                                 <TextBlock Text="{Binding AuthorDisplay}"
                                            Style="{StaticResource MutedTextStyle}" Margin="6,0,0,0" />
@@ -399,6 +400,31 @@
                                  row visually quiet at rest. -->
                             <StackPanel Grid.Column="2" Grid.RowSpan="2" Orientation="Horizontal"
                                         VerticalAlignment="Center" Margin="4,0,4,0">
+                                <!-- Always-visible update affordance. Doubles as a status badge so the
+                                     row reads as 'has update' even when not hovered, and as a one-click
+                                     update target when the user does hover. Hidden during an in-flight
+                                     operation so the spinner in the hover zone owns the visual state. -->
+                                <Button Command="{Binding DataContext.QuickUpdateCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                        CommandParameter="{Binding}"
+                                        ToolTip="Update to latest version"
+                                        AutomationProperties.Name="{Binding UpdateButtonAccessibleName}">
+                                    <Button.Style>
+                                        <Style TargetType="Button" BasedOn="{StaticResource IconButtonStyle}">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                            <Style.Triggers>
+                                                <MultiDataTrigger>
+                                                    <MultiDataTrigger.Conditions>
+                                                        <Condition Binding="{Binding HasUpdate}" Value="True" />
+                                                        <Condition Binding="{Binding IsOperationInProgress}" Value="False" />
+                                                    </MultiDataTrigger.Conditions>
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                </MultiDataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
+                                    <imaging:CrispImage Width="16" Height="16"
+                                                        Moniker="{x:Static catalog:KnownMonikers.StatusUpdateAvailable}" />
+                                </Button>
                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                 <StackPanel.Style>
                                     <Style TargetType="StackPanel">
@@ -500,32 +526,6 @@
                                                         Moniker="{x:Static catalog:KnownMonikers.Remove}" />
                                 </Button>
                                 </StackPanel>
-
-                                <!-- Always-visible update affordance. Doubles as a status badge so the
-                                     row reads as 'has update' even when not hovered, and as a one-click
-                                     update target when the user does hover. Hidden during an in-flight
-                                     operation so the spinner in the hover zone owns the visual state. -->
-                                <Button Command="{Binding DataContext.QuickUpdateCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
-                                        CommandParameter="{Binding}"
-                                        ToolTip="Update to latest version"
-                                        AutomationProperties.Name="{Binding UpdateButtonAccessibleName}">
-                                    <Button.Style>
-                                        <Style TargetType="Button" BasedOn="{StaticResource IconButtonStyle}">
-                                            <Setter Property="Visibility" Value="Collapsed" />
-                                            <Style.Triggers>
-                                                <MultiDataTrigger>
-                                                    <MultiDataTrigger.Conditions>
-                                                        <Condition Binding="{Binding HasUpdate}" Value="True" />
-                                                        <Condition Binding="{Binding IsOperationInProgress}" Value="False" />
-                                                    </MultiDataTrigger.Conditions>
-                                                    <Setter Property="Visibility" Value="Visible" />
-                                                </MultiDataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </Button.Style>
-                                    <imaging:CrispImage Width="16" Height="16"
-                                                        Moniker="{x:Static catalog:KnownMonikers.StatusUpdateAvailable}" />
-                                </Button>
                             </StackPanel>
                         </Grid>
                     </DataTemplate>

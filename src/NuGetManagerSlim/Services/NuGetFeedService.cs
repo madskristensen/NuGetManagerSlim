@@ -393,6 +393,29 @@ namespace NuGetManagerSlim.Services
                         }))
                         .ToList();
 
+                    // PackageMetadataResource exposes per-version download counts which are
+                    // typically null for most v3 feeds. Query the search resource as a
+                    // fallback so installed packages still pick up the cumulative total.
+                    long downloadCount = latest.DownloadCount ?? 0;
+                    if (downloadCount == 0)
+                    {
+                        try
+                        {
+                            var searchResource = await repository.GetResourceAsync<PackageSearchResource>(cancellationToken).ConfigureAwait(false);
+                            if (searchResource != null)
+                            {
+                                var hits = await searchResource.SearchAsync(
+                                    "packageid:" + packageId,
+                                    new SearchFilter(includePrerelease: true),
+                                    0, 1, _logger, cancellationToken).ConfigureAwait(false);
+                                var hit = hits?.FirstOrDefault();
+                                if (hit?.DownloadCount != null) downloadCount = hit.DownloadCount.Value;
+                            }
+                        }
+                        catch (OperationCanceledException) { throw; }
+                        catch { /* search fallback is best-effort */ }
+                    }
+
                     return new PackageModel
                     {
                         PackageId = latest.Identity.Id,
@@ -402,7 +425,7 @@ namespace NuGetManagerSlim.Services
                         Authors = latest.Authors,
                         LicenseExpression = latest.LicenseMetadata?.License,
                         LicenseUrl = latest.LicenseUrl?.ToString(),
-                        DownloadCount = latest.DownloadCount ?? 0,
+                        DownloadCount = downloadCount,
                         SourceName = source.Name,
                         ProjectUrl = latest.ProjectUrl?.ToString(),
                         IconUrl = latest.IconUrl?.ToString(),

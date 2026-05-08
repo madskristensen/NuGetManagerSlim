@@ -11,7 +11,8 @@ namespace NuGetManagerSlim.Commands
     {
         protected override void BeforeQueryStatus(EventArgs e)
         {
-            Command.Enabled = NuGetQuickManagerToolWindow.Pane.CurrentViewModel != null;
+            var vm = NuGetQuickManagerToolWindow.Pane.CurrentViewModel;
+            Command.Enabled = vm?.HasProject == true;
         }
 
         protected override async Task ExecuteAsync(OleMenuCmdEventArgs e)

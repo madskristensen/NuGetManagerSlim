@@ -14,7 +14,7 @@ namespace NuGetManagerSlim.Commands
         {
             var vm = NuGetQuickManagerToolWindow.Pane.CurrentViewModel;
             Command.Visible = true;
-            Command.Enabled = vm != null;
+            Command.Enabled = vm?.HasProject == true;
             Command.Checked = vm?.ViewMode == PackageViewMode.Browse;
         }
 

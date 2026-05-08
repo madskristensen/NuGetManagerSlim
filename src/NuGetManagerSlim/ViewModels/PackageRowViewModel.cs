@@ -63,6 +63,33 @@ namespace NuGetManagerSlim.ViewModels
                 OnPropertyChanged(nameof(AuthorDisplay));
                 OnPropertyChanged(nameof(HasUpdate));
                 OnPropertyChanged(nameof(UpdateBadge));
+                OnPropertyChanged(nameof(DownloadCountDisplay));
+            }
+            else if (_model.DownloadCount <= 0 && metadata.DownloadCount > 0)
+            {
+                _model = new PackageModel
+                {
+                    PackageId = _model.PackageId,
+                    InstalledVersion = _model.InstalledVersion,
+                    LatestStableVersion = _model.LatestStableVersion ?? metadata.LatestStableVersion,
+                    LatestPrereleaseVersion = _model.LatestPrereleaseVersion ?? metadata.LatestPrereleaseVersion,
+                    Description = _model.Description ?? metadata.Description,
+                    Authors = _model.Authors,
+                    LicenseExpression = _model.LicenseExpression ?? metadata.LicenseExpression,
+                    LicenseUrl = _model.LicenseUrl ?? metadata.LicenseUrl,
+                    DownloadCount = metadata.DownloadCount,
+                    SourceName = _model.SourceName,
+                    IsTransitive = _model.IsTransitive,
+                    RequiredByPackageId = _model.RequiredByPackageId,
+                    ReadmeUrl = _model.ReadmeUrl ?? metadata.ReadmeUrl,
+                    ProjectUrl = _model.ProjectUrl ?? metadata.ProjectUrl,
+                    IconUrl = _iconUrlOverride ?? metadata.IconUrl,
+                    PerFrameworkVersions = _model.PerFrameworkVersions,
+                    Dependencies = _model.Dependencies,
+                };
+                OnPropertyChanged(nameof(HasUpdate));
+                OnPropertyChanged(nameof(UpdateBadge));
+                OnPropertyChanged(nameof(DownloadCountDisplay));
             }
         }
 
@@ -102,6 +129,18 @@ namespace NuGetManagerSlim.ViewModels
         public string UpdateBadge => HasUpdate ? $"→ {_model.LatestStableVersion}" : string.Empty;
 
         public string AuthorDisplay => string.IsNullOrEmpty(_model.Authors) ? string.Empty : $"by {_model.Authors}";
+
+        public string DownloadCountDisplay => _model.DownloadCount > 0
+            ? $"{FormatDownloadCount(_model.DownloadCount)} downloads"
+            : string.Empty;
+
+        private static string FormatDownloadCount(long count)
+        {
+            if (count >= 1_000_000_000) return $"{count / 1_000_000_000.0:F1}B";
+            if (count >= 1_000_000) return $"{count / 1_000_000.0:F1}M";
+            if (count >= 1_000) return $"{count / 1_000.0:F1}K";
+            return count.ToString();
+        }
 
         public string SourceBadge => string.IsNullOrEmpty(_model.SourceName) ? string.Empty : $"⊕ {_model.SourceName}";
 
