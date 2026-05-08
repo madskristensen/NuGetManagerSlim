@@ -567,7 +567,9 @@
                     <TextBlock Text="{Binding Detail.Description}"
                                TextWrapping="Wrap"
                                Style="{StaticResource MutedTextStyle}"
-                               Margin="0,0,0,6" />
+                               LineHeight="18"
+                               LineStackingStrategy="BlockLineHeight"
+                               Margin="0,2,0,10" />
 
                     <!-- Metadata row -->
                     <WrapPanel Margin="0,0,0,6">
@@ -661,7 +663,6 @@
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <CheckBox Grid.Column="0"
                           IsChecked="{Binding FilterPrerelease}"
@@ -671,11 +672,6 @@
                           FontSize="11"
                           Foreground="{DynamicResource {x:Static vsui:EnvironmentColors.StatusBarDefaultTextBrushKey}}"
                           AutomationProperties.Name="Include prerelease versions" />
-                <Button Grid.Column="1" Content="View log"
-                        Command="{Binding ToggleLogCommand}"
-                        Padding="8,2"
-                        Margin="4,0"
-                        AutomationProperties.Name="View operation log" />
             </Grid>
         </Border>
 
