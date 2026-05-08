@@ -189,20 +189,14 @@ namespace NuGetManagerSlim.Services
 
         private static IReadOnlyList<string> ResolveScopePaths(ProjectScopeModel scope)
         {
-            if (scope.IsSolutionScope)
-            {
-                if (scope.ProjectFullPaths == null) return Array.Empty<string>();
-                return scope.ProjectFullPaths
-                    .Where(p => !string.IsNullOrEmpty(p) && IsManagedDotNetProject(p))
-                    .ToList();
-            }
             if (string.IsNullOrEmpty(scope.ProjectFullPath)) return Array.Empty<string>();
-            return new[] { scope.ProjectFullPath! };
+            if (!IsManagedDotNetProject(scope.ProjectFullPath)) return Array.Empty<string>();
+            return new[] { scope.ProjectFullPath };
         }
 
-        // Aggregation rule for solution scope: dedupe by package id and keep
-        // the highest installed version observed across projects so the row
-        // reads as "what's installed somewhere in this solution".
+        // Dedupe by package id within a single project (e.g. the same id
+        // appears in both PackageReference and packages.config). Keeps the
+        // highest installed version observed.
         private static void MergeInstalled(Dictionary<string, PackageModel> byId, PackageModel pkg)
         {
             if (string.IsNullOrEmpty(pkg.PackageId)) return;

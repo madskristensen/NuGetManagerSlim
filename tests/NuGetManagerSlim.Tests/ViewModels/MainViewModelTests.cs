@@ -105,61 +105,6 @@ namespace NuGetManagerSlim.Tests.ViewModels
         }
 
         [Fact]
-        public async Task SetSolutionScopeAsync_SetsReadOnlyScope()
-        {
-            var (vm, _, _, _) = CreateViewModel();
-            await vm.InitializeAsync(CancellationToken.None);
-
-            await vm.SetSolutionScopeAsync("MySolution", new[] { @"C:\App\A.csproj", @"C:\App\B.csproj" });
-
-            Assert.NotNull(vm.CurrentProject);
-            Assert.True(vm.CurrentProject!.IsSolutionScope);
-            Assert.Equal("MySolution", vm.CurrentProject.DisplayName);
-            Assert.Null(vm.CurrentProject.ProjectFullPath);
-            Assert.Equal(2, vm.CurrentProject.ProjectFullPaths.Count);
-            Assert.True(vm.HasProject);
-            Assert.True(vm.IsReadOnlyScope);
-        }
-
-        [Fact]
-        public async Task SetSolutionScopeAsync_DoesNotStartRestoreMonitoring()
-        {
-            var (vm, _, _, restoreMock) = CreateViewModel();
-            await vm.InitializeAsync(CancellationToken.None);
-
-            await vm.SetSolutionScopeAsync("MySolution", new[] { @"C:\App\A.csproj" });
-
-            restoreMock.Verify(r => r.StartMonitoring(It.IsAny<ProjectScopeModel>()), Times.Never);
-        }
-
-        [Fact]
-        public async Task SetSolutionScopeAsync_WithNoProjects_ClearsScope()
-        {
-            var (vm, _, _, _) = CreateViewModel();
-            await vm.InitializeAsync(CancellationToken.None);
-            await vm.SetCurrentProjectAsync(@"C:\MyApp\MyApp.csproj", "MyApp");
-
-            await vm.SetSolutionScopeAsync("MySolution", System.Array.Empty<string>());
-
-            Assert.Null(vm.CurrentProject);
-            Assert.False(vm.IsReadOnlyScope);
-        }
-
-        [Fact]
-        public async Task SetCurrentProjectAsync_AfterSetSolutionScopeAsync_ExitsReadOnly()
-        {
-            var (vm, _, _, _) = CreateViewModel();
-            await vm.InitializeAsync(CancellationToken.None);
-            await vm.SetSolutionScopeAsync("MySolution", new[] { @"C:\App\A.csproj" });
-            Assert.True(vm.IsReadOnlyScope);
-
-            await vm.SetCurrentProjectAsync(@"C:\MyApp\MyApp.csproj", "MyApp");
-
-            Assert.False(vm.IsReadOnlyScope);
-            Assert.Equal(@"C:\MyApp\MyApp.csproj", vm.CurrentProject!.ProjectFullPath);
-        }
-
-        [Fact]
         public void SearchText_DefaultIsEmpty()
         {
             var (vm, _, _, _) = CreateViewModel();

@@ -88,8 +88,8 @@ namespace NuGetManagerSlim.ViewModels
 
             await LoadVersionMetadataAsync(SelectedVersion, cancellationToken);
 
-            // In solution scope ProjectFullPath is null; install / update /
-            // uninstall require a single target project, so disable them.
+            // Install / update / uninstall require a single target project,
+            // so disable them when no project is selected.
             var hasProjectTarget = !string.IsNullOrEmpty(_projectFullPath);
             CanInstall = hasProjectTarget && !row.IsInstalled;
             CanUpdate = hasProjectTarget && row.HasUpdate;

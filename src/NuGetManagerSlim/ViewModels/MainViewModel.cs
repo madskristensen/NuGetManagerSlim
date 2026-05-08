@@ -95,12 +95,6 @@ namespace NuGetManagerSlim.ViewModels
         public bool HasDetailPane => HasSelectedPackage || HasMultiSelection;
         public bool HasProject => CurrentProject != null;
 
-        // True when the active scope is the whole solution. Solution scope is
-        // read-only: install / update / uninstall affordances are hidden so the
-        // user can browse what's installed across projects without accidentally
-        // applying a change to an ambiguous target.
-        public bool IsReadOnlyScope => CurrentProject?.IsSolutionScope == true;
-
         public PackageViewMode ViewMode
         {
             get
@@ -261,27 +255,6 @@ namespace NuGetManagerSlim.ViewModels
             await ReloadPackagesAsync();
         }
 
-        // Switches the tool window to a read-only solution-wide view that
-        // aggregates installed packages across every managed .NET project in
-        // the solution. Used when the user has a solution loaded but no active
-        // project (Solution node selected, or VS just opened a solution).
-        public async Task SetSolutionScopeAsync(string solutionDisplayName, IReadOnlyList<string> projectFullPaths, CancellationToken cancellationToken = default)
-        {
-            if (projectFullPaths == null || projectFullPaths.Count == 0)
-            {
-                ClearCurrentProject();
-                return;
-            }
-
-            CurrentProject = new ProjectScopeModel
-            {
-                DisplayName = string.IsNullOrEmpty(solutionDisplayName) ? "Solution" : solutionDisplayName,
-                IsSolutionScope = true,
-                ProjectFullPaths = projectFullPaths,
-            };
-            await ReloadPackagesAsync();
-        }
-
         public void ClearCurrentProject()
         {
             CurrentProject = null;
@@ -354,14 +327,11 @@ namespace NuGetManagerSlim.ViewModels
         partial void OnCurrentProjectChanged(ProjectScopeModel? value)
         {
             _restoreMonitor.StopMonitoring();
-            // Restore monitoring is per-project; skip it for the aggregated
-            // solution view since there's no single obj\ to watch.
-            if (value != null && !value.IsSolutionScope)
+            if (value != null)
             {
                 _restoreMonitor.StartMonitoring(value);
             }
             OnPropertyChanged(nameof(HasProject));
-            OnPropertyChanged(nameof(IsReadOnlyScope));
         }
 
         partial void OnSelectedPackageChanged(PackageRowViewModel? value)
@@ -961,11 +931,9 @@ namespace NuGetManagerSlim.ViewModels
         public async Task ReloadPackagesAsync()
         {
             // Re-load packages using the current scope, view-mode and search.
-            // Solution scope is read-only and never shows online search results -
-            // it always shows the aggregated installed list.
             try
             {
-                if (FilterInstalled || FilterUpdates || IsReadOnlyScope)
+                if (FilterInstalled || FilterUpdates)
                 {
                     var ct = ReplaceCts(ref _filterCts);
                     await ApplyFiltersAsync(ct);
@@ -998,17 +966,12 @@ namespace NuGetManagerSlim.ViewModels
         private async Task QuickUpdateAsync(PackageRowViewModel? row)
         {
             if (row == null) return;
-            if (IsReadOnlyScope)
-            {
-                SetStatus("Switch to a single project to update packages.");
-                return;
-            }
             row.IsOperationInProgress = true;
             try
             {
                 SetStatus($"Updating {row.PackageId}…");
-                if (CurrentProject?.ProjectFullPath != null && row.LatestStableVersion != null)
-                    await _projectService.UpdatePackageAsync(CurrentProject.ProjectFullPath, row.PackageId, row.LatestStableVersion, CancellationToken.None);
+                if (!string.IsNullOrEmpty(CurrentProject?.ProjectFullPath) && row.LatestStableVersion != null)
+                    await _projectService.UpdatePackageAsync(CurrentProject!.ProjectFullPath, row.PackageId, row.LatestStableVersion, CancellationToken.None);
                 RecordMru(row, row.LatestStableVersion);
                 var done = $"✓ Updated {row.PackageId} → {row.LatestStableVersion}";
                 SetStatus(done);
@@ -1030,11 +993,6 @@ namespace NuGetManagerSlim.ViewModels
         private async Task QuickInstallAsync(PackageRowViewModel? row)
         {
             if (row == null) return;
-            if (IsReadOnlyScope)
-            {
-                SetStatus("Switch to a single project to install packages.");
-                return;
-            }
             var version = row.LatestStableVersion ?? row.LatestPrereleaseVersion;
             if (version == null) return;
 
@@ -1042,9 +1000,9 @@ namespace NuGetManagerSlim.ViewModels
             try
             {
                 SetStatus($"Installing {row.PackageId}…");
-                if (CurrentProject?.ProjectFullPath != null)
+                if (!string.IsNullOrEmpty(CurrentProject?.ProjectFullPath))
                 {
-                    await _projectService.InstallPackageAsync(CurrentProject.ProjectFullPath, row.PackageId, version, CancellationToken.None);
+                    await _projectService.InstallPackageAsync(CurrentProject!.ProjectFullPath, row.PackageId, version, CancellationToken.None);
                 }
                 RecordMru(row, version);
                 var done = $"✓ Installed {row.PackageId} {version}";
@@ -1067,18 +1025,13 @@ namespace NuGetManagerSlim.ViewModels
         private async Task QuickUninstallAsync(PackageRowViewModel? row)
         {
             if (row == null) return;
-            if (IsReadOnlyScope)
-            {
-                SetStatus("Switch to a single project to uninstall packages.");
-                return;
-            }
             row.IsOperationInProgress = true;
             try
             {
                 SetStatus($"Uninstalling {row.PackageId}…");
-                if (CurrentProject?.ProjectFullPath != null)
+                if (!string.IsNullOrEmpty(CurrentProject?.ProjectFullPath))
                 {
-                    await _projectService.UninstallPackageAsync(CurrentProject.ProjectFullPath, row.PackageId, CancellationToken.None);
+                    await _projectService.UninstallPackageAsync(CurrentProject!.ProjectFullPath, row.PackageId, CancellationToken.None);
                 }
                 var done = $"✓ Uninstalled {row.PackageId}";
                 SetStatus(done);
@@ -1152,9 +1105,7 @@ namespace NuGetManagerSlim.ViewModels
             }
             if (!FilterInstalled && !FilterUpdates && string.IsNullOrWhiteSpace(SearchText))
             {
-                EmptyStateMessage = IsReadOnlyScope
-                    ? "Search for a package, or toggle Installed to see what's in your solution. Select a project to install or update."
-                    : "Search for a package to get started, or toggle Installed to see what's in your project.";
+                EmptyStateMessage = "Search for a package to get started, or toggle Installed to see what's in your project.";
                 return;
             }
             if (FilterUpdates && Packages.Count == 0)

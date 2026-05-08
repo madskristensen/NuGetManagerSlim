@@ -417,7 +417,13 @@
                                  glance) while install / uninstall remain hover-only to keep the
                                  row visually quiet at rest. -->
                             <StackPanel Grid.Column="2" Grid.RowSpan="2" Orientation="Vertical"
-                                        VerticalAlignment="Center" Margin="4,0,4,0">
+                                        VerticalAlignment="Center" Margin="4,0,4,0"
+                                        MinHeight="44">
+                                <!-- MinHeight reserves the same vertical space whether the action
+                                     icons are showing or not, so toggling them (multi-select,
+                                     hover, in-flight operation) doesn't make every row in the
+                                     list shift up or down. Matches the natural height of the two
+                                     stacked 16px icon buttons. -->
                                 <!-- Always-visible update affordance. Doubles as a status badge so the
                                      row reads as 'has update' even when not hovered, and as a one-click
                                      update target when the user does hover. Hidden during an in-flight
@@ -434,7 +440,6 @@
                                                     <MultiDataTrigger.Conditions>
                                                         <Condition Binding="{Binding HasUpdate}" Value="True" />
                                                         <Condition Binding="{Binding IsOperationInProgress}" Value="False" />
-                                                        <Condition Binding="{Binding DataContext.IsReadOnlyScope, RelativeSource={RelativeSource AncestorType=ListBox}}" Value="False" />
                                                         <Condition Binding="{Binding DataContext.HasMultiSelection, RelativeSource={RelativeSource AncestorType=ListBox}}" Value="False" />
                                                     </MultiDataTrigger.Conditions>
                                                     <Setter Property="Visibility" Value="Visible" />
@@ -521,7 +526,6 @@
                                                     <MultiDataTrigger.Conditions>
                                                         <Condition Binding="{Binding CanQuickInstall}" Value="True" />
                                                         <Condition Binding="{Binding IsOperationInProgress}" Value="False" />
-                                                        <Condition Binding="{Binding DataContext.IsReadOnlyScope, RelativeSource={RelativeSource AncestorType=ListBox}}" Value="False" />
                                                     </MultiDataTrigger.Conditions>
                                                     <Setter Property="Visibility" Value="Visible" />
                                                 </MultiDataTrigger>
@@ -543,7 +547,6 @@
                                                     <MultiDataTrigger.Conditions>
                                                         <Condition Binding="{Binding CanQuickUninstall}" Value="True" />
                                                         <Condition Binding="{Binding IsOperationInProgress}" Value="False" />
-                                                        <Condition Binding="{Binding DataContext.IsReadOnlyScope, RelativeSource={RelativeSource AncestorType=ListBox}}" Value="False" />
                                                     </MultiDataTrigger.Conditions>
                                                     <Setter Property="Visibility" Value="Visible" />
                                                 </MultiDataTrigger>
