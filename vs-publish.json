@@ -7,6 +7,26 @@
     "tags": [ "nuget", "package" ]
   },
   "assetFiles": [
+    {
+      "pathOnDisk": "art/tool-window.png",
+      "targetPath": "art/tool-window.png"
+    },
+    {
+      "pathOnDisk": "art/scope.png",
+      "targetPath": "art/scope.png"
+    },
+    {
+      "pathOnDisk": "art/installed.png",
+      "targetPath": "art/installed.png"
+    },
+    {
+      "pathOnDisk": "art/filter.png",
+      "targetPath": "art/filter.png"
+    },
+    {
+      "pathOnDisk": "art/details.png",
+      "targetPath": "art/details.png"
+    }
   ],
   "overview": "README.md",
   "publisher": "MadsKristensen",

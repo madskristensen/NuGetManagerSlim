@@ -23,7 +23,7 @@ namespace NuGetManagerSlim.ToolWindows
         // here and let the Pane pick it up when it's instantiated.
         private static (MainViewModel ViewModel, NuGetFeedService FeedService, RestoreMonitorService RestoreMonitor)? _pendingSession;
 
-        public override string GetTitle(int toolWindowId) => "NuGet Quick Manager";
+        public override string GetTitle(int toolWindowId) => "NuGet Manager (Slim)";
 
         public override Type PaneType => typeof(Pane);
 
@@ -112,8 +112,8 @@ namespace NuGetManagerSlim.ToolWindows
                     {
                         var project = viewModel.CurrentProject;
                         Caption = project == null
-                            ? "NuGet Quick Manager"
-                            : $"NuGet Quick Manager - {project.DisplayName}";
+                            ? "NuGet Manager (Slim)"
+                            : $"NuGet Manager (Slim) - {project.DisplayName}";
                     }
                 };
                 viewModel.PropertyChanged += _viewModelPropertyChanged;
