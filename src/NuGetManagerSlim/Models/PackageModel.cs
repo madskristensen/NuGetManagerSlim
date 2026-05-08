@@ -33,5 +33,9 @@ namespace NuGetManagerSlim.Models
         public string DisplayText => string.IsNullOrEmpty(TargetFramework)
             ? $"{PackageId} {VersionRange}"
             : $"{PackageId} {VersionRange} [{TargetFramework}]";
+
+        // Used by the dependency tree's per-TFM groups, where the TFM is shown
+        // in the group header and would be redundant on every leaf row.
+        public string NameAndVersion => $"{PackageId} {VersionRange}";
     }
 }

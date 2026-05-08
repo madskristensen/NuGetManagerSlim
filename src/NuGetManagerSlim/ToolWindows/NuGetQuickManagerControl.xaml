@@ -398,7 +398,7 @@
                                  update is available (so users can spot updateable packages at a
                                  glance) while install / uninstall remain hover-only to keep the
                                  row visually quiet at rest. -->
-                            <StackPanel Grid.Column="2" Grid.RowSpan="2" Orientation="Horizontal"
+                            <StackPanel Grid.Column="2" Grid.RowSpan="2" Orientation="Vertical"
                                         VerticalAlignment="Center" Margin="4,0,4,0">
                                 <!-- Always-visible update affordance. Doubles as a status badge so the
                                      row reads as 'has update' even when not hovered, and as a one-click
@@ -425,7 +425,7 @@
                                     <imaging:CrispImage Width="16" Height="16"
                                                         Moniker="{x:Static catalog:KnownMonikers.StatusUpdateAvailable}" />
                                 </Button>
-                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <StackPanel Orientation="Vertical" HorizontalAlignment="Center">
                                 <StackPanel.Style>
                                     <Style TargetType="StackPanel">
                                         <Setter Property="Visibility" Value="Hidden" />
@@ -678,14 +678,26 @@
                         </StackPanel>
                     </Expander>
 
-                    <!-- Dependency tree -->
+                    <!-- Dependency tree (grouped by target framework) -->
                     <Expander Header="Dependencies" IsExpanded="False">
-                        <ItemsControl ItemsSource="{Binding Detail.Dependencies}">
+                        <ItemsControl ItemsSource="{Binding Detail.DependencyGroups}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                    <TextBlock Text="{Binding DisplayText}"
-                                               Style="{StaticResource MutedTextStyle}"
-                                               Margin="4,1" />
+                                    <StackPanel Margin="0,2,0,4">
+                                        <TextBlock Text="{Binding Header}"
+                                                   FontWeight="SemiBold"
+                                                   FontSize="11"
+                                                   Margin="0,0,0,2" />
+                                        <ItemsControl ItemsSource="{Binding Items}" Margin="12,0,0,0">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <TextBlock Text="{Binding NameAndVersion}"
+                                                               Style="{StaticResource MutedTextStyle}"
+                                                               Margin="0,1" />
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>

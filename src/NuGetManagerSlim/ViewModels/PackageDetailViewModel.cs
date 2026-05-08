@@ -1,5 +1,6 @@
 using System;
 using System.Collections.ObjectModel;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -35,6 +36,7 @@ namespace NuGetManagerSlim.ViewModels
         public ObservableCollection<NuGetVersion> AvailableVersions { get; } = [];
         public ObservableCollection<ProjectMembershipViewModel> ProjectMemberships { get; } = [];
         public ObservableCollection<PackageDependencyInfo> Dependencies { get; } = [];
+        public ObservableCollection<DependencyGroupViewModel> DependencyGroups { get; } = [];
 
         private CancellationTokenSource? _versionMetadataCts;
         private bool _suppressVersionReload;
@@ -57,6 +59,7 @@ namespace NuGetManagerSlim.ViewModels
             _projectFullPath = scope?.ProjectFullPath;
             AvailableVersions.Clear();
             Dependencies.Clear();
+            DependencyGroups.Clear();
             ProjectMemberships.Clear();
 
             // Load versions
@@ -111,6 +114,23 @@ namespace NuGetManagerSlim.ViewModels
                 Dependencies.Clear();
                 foreach (var dep in metadata.Dependencies)
                     Dependencies.Add(dep);
+
+                DependencyGroups.Clear();
+                // Group by TFM the same way the built-in NuGet Package Manager does:
+                // one collapsible-style header per target framework, dependencies listed
+                // beneath it. Keeps the dependency list legible for multi-targeted packages.
+                var groups = metadata.Dependencies
+                    .GroupBy(d => d.TargetFramework ?? string.Empty)
+                    .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase);
+                foreach (var g in groups)
+                {
+                    DependencyGroups.Add(new DependencyGroupViewModel
+                    {
+                        TargetFramework = g.Key,
+                        Header = string.IsNullOrEmpty(g.Key) ? "Any" : g.Key,
+                        Items = g.ToList(),
+                    });
+                }
             }
             catch (OperationCanceledException) { }
             catch (Exception ex)
@@ -217,5 +237,12 @@ namespace NuGetManagerSlim.ViewModels
             get => _isSelected;
             set => SetProperty(ref _isSelected, value);
         }
+    }
+
+    public class DependencyGroupViewModel
+    {
+        public string TargetFramework { get; init; } = string.Empty;
+        public string Header { get; init; } = string.Empty;
+        public System.Collections.Generic.IReadOnlyList<PackageDependencyInfo> Items { get; init; } = [];
     }
 }
