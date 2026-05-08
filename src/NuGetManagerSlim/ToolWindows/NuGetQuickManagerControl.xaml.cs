@@ -43,12 +43,50 @@ namespace NuGetManagerSlim.ToolWindows
             {
                 DetailScrollViewer?.ScrollToTop();
             }
+            else if (e.PropertyName == nameof(MainViewModel.CurrentProject))
+            {
+                // Reset the package list scroll position when the user
+                // switches projects so the new project's list is read from
+                // the top instead of inheriting the previous list's offset.
+                ScrollPackageListToTop();
+            }
+        }
+
+        private void ScrollPackageListToTop()
+        {
+            if (PackageListBox == null) return;
+            var scrollViewer = FindDescendant<ScrollViewer>(PackageListBox);
+            scrollViewer?.ScrollToTop();
+        }
+
+        private static T? FindDescendant<T>(System.Windows.DependencyObject root) where T : System.Windows.DependencyObject
+        {
+            if (root == null) return null;
+            int count = System.Windows.Media.VisualTreeHelper.GetChildrenCount(root);
+            for (int i = 0; i < count; i++)
+            {
+                var child = System.Windows.Media.VisualTreeHelper.GetChild(root, i);
+                if (child is T match) return match;
+                var deeper = FindDescendant<T>(child);
+                if (deeper != null) return deeper;
+            }
+            return null;
         }
 
         private void PackageListBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             if (PackageListBox.SelectedItem != null)
                 PackageListBox.ScrollIntoView(PackageListBox.SelectedItem);
+
+            // ListBox.SelectedItems isn't bindable; push the current set to
+            // the VM so multi-select drives the bulk-action detail pane and
+            // single-select keeps the per-package detail pane.
+            var rows = new System.Collections.Generic.List<PackageRowViewModel>(PackageListBox.SelectedItems.Count);
+            foreach (var item in PackageListBox.SelectedItems)
+            {
+                if (item is PackageRowViewModel row) rows.Add(row);
+            }
+            _viewModel.SetSelectedPackages(rows);
         }
 
         private void PackageIcon_ImageFailed(object sender, ExceptionRoutedEventArgs e)

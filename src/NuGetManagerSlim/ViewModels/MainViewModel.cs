@@ -80,6 +80,7 @@ namespace NuGetManagerSlim.ViewModels
         [ObservableProperty] private string _emptyStateMessage = "Open a project context menu and pick 'Manage NuGet Packages' to get started.";
         [ObservableProperty] private PackageRowViewModel? _selectedPackage;
         [ObservableProperty] private PackageDetailViewModel? _detail;
+        [ObservableProperty] private MultiSelectionViewModel? _multiSelection;
 
         public ObservableCollection<PackageRowViewModel> Packages => _packages;
         private readonly BulkObservableCollection<PackageRowViewModel> _packages = [];
@@ -90,6 +91,8 @@ namespace NuGetManagerSlim.ViewModels
         public bool IsEmptyState => !IsLoading && !ShowSkeleton && Packages.Count == 0;
         public bool ShowSkeleton => IsRemoteLoading && Packages.Count == 0;
         public bool HasSelectedPackage => SelectedPackage != null;
+        public bool HasMultiSelection => MultiSelection != null;
+        public bool HasDetailPane => HasSelectedPackage || HasMultiSelection;
         public bool HasProject => CurrentProject != null;
 
         // True when the active scope is the whole solution. Solution scope is
@@ -284,7 +287,12 @@ namespace NuGetManagerSlim.ViewModels
             CurrentProject = null;
             _packages.ReplaceAll(System.Linq.Enumerable.Empty<PackageRowViewModel>());
             Detail = null;
+            MultiSelection = null;
             SelectedPackage = null;
+            // Always start fresh in Browse when the solution closes so the
+            // next solution loads at the default scope rather than inheriting
+            // whatever the user last picked.
+            ViewMode = PackageViewMode.Browse;
             UpdateEmptyState();
             OnPropertyChanged(nameof(HasPackages));
             OnPropertyChanged(nameof(IsEmptyState));
@@ -359,8 +367,50 @@ namespace NuGetManagerSlim.ViewModels
         partial void OnSelectedPackageChanged(PackageRowViewModel? value)
         {
             OnPropertyChanged(nameof(HasSelectedPackage));
+            OnPropertyChanged(nameof(HasDetailPane));
             if (value != null)
                 _ = LoadDetailAsync(value);
+        }
+
+        partial void OnMultiSelectionChanged(MultiSelectionViewModel? value)
+        {
+            OnPropertyChanged(nameof(HasMultiSelection));
+            OnPropertyChanged(nameof(HasDetailPane));
+        }
+
+        // Called by the view (ListBox SelectionChanged) whenever the set of
+        // selected rows changes. Drives single- vs multi-select detail panes.
+        public void SetSelectedPackages(IReadOnlyList<PackageRowViewModel> rows)
+        {
+            if (rows == null || rows.Count == 0)
+            {
+                SelectedPackage = null;
+                MultiSelection = null;
+                Detail = null;
+                return;
+            }
+
+            if (rows.Count == 1)
+            {
+                MultiSelection = null;
+                SelectedPackage = rows[0];
+                return;
+            }
+
+            // Multi-select: clear single-package detail and surface the
+            // bulk-action view-model instead.
+            Detail = null;
+            SelectedPackage = null;
+            MultiSelection = new MultiSelectionViewModel(
+                rows,
+                CurrentProject,
+                _projectService,
+                msg =>
+                {
+                    SetStatus(msg);
+                    AppendOperationLog($"[{DateTime.Now:HH:mm:ss}] {msg}");
+                },
+                async () => await ReloadPackagesAsync());
         }
 
         private void OnDebounceElapsed(object? sender, System.Timers.ElapsedEventArgs e)
@@ -508,8 +558,19 @@ namespace NuGetManagerSlim.ViewModels
                     // HasUpdate depends on LatestStableVersion which is normally
                     // populated asynchronously by EnrichInstalledMetadataInBackground.
                     // In the Updates view we have to know latest versions up front,
-                    // so synchronously fan out metadata fetches before filtering.
-                    await EnrichRowsAsync(rows, cancellationToken).ConfigureAwait(true);
+                    // so first apply any cached "latest" metadata (warm-session
+                    // switches become near-instant) and only fan out network
+                    // fetches for the rows that haven't been enriched yet.
+                    var rowsNeedingFetch = new List<PackageRowViewModel>(rows.Count);
+                    foreach (var row in rows)
+                    {
+                        if (_feedService.TryGetCachedLatestMetadata(row.PackageId, out var cachedMeta) && cachedMeta != null)
+                            row.ApplyMetadata(cachedMeta);
+                        else
+                            rowsNeedingFetch.Add(row);
+                    }
+                    if (rowsNeedingFetch.Count > 0)
+                        await EnrichRowsAsync(rowsNeedingFetch, cancellationToken).ConfigureAwait(true);
                     rows = rows.Where(r => r.HasUpdate).ToList();
                 }
 

@@ -15,6 +15,12 @@ namespace NuGetManagerSlim
     {
         public const string NuGetManagerSlimString = "f6649f79-8c76-4df8-ae04-370c692ed6ed";
         public static Guid NuGetManagerSlim = new Guid(NuGetManagerSlimString);
+
+        public const string ImageCatalogGuidString = "ae27a6b0-e345-4288-96df-5eaf394ee369";
+        public static Guid ImageCatalogGuid = new Guid(ImageCatalogGuidString);
+
+        public const string DotNetProjectContextString = "9b254846-1ea2-451c-b07c-4ac6a8c64f37";
+        public static Guid DotNetProjectContext = new Guid(DotNetProjectContextString);
     }
 
     /// <summary>
@@ -34,5 +40,6 @@ namespace NuGetManagerSlim
         public const int RefreshCommand = 0x0203;
         public const int OpenForProjectCommand = 0x0204;
         public const int ProjectContextGroup = 0x1200;
+        public const int StatusUpdateAvailable = 0x0F82;
     }
 }

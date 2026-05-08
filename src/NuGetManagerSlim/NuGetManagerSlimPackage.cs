@@ -16,6 +16,16 @@ namespace NuGetManagerSlim
         Style = VsDockStyle.Tabbed,
         Window = WindowGuids.SolutionExplorer,
         Orientation = ToolWindowOrientation.Right)]
+    // Drives the visibility of OpenForProjectCommand. The rule is true when the
+    // active hierarchy selection (the project being right-clicked in Solution
+    // Explorer) reports the "DotNet" project capability, which covers C#, VB,
+    // F#, and any other managed project flavor we want to support.
+    [ProvideUIContextRule(
+        contextGuid: UIContextGuids.DotNetProjectContextString,
+        name: "DotNetProjectContextRule",
+        expression: "DotNet",
+        termNames: new[] { "DotNet" },
+        termValues: new[] { "ActiveProjectCapability:DotNet" })]
     [Guid(PackageGuids.NuGetManagerSlimString)]
     public sealed class NuGetManagerSlimPackage : ToolkitPackage
     {

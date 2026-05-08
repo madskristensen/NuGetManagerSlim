@@ -68,7 +68,7 @@ namespace NuGetManagerSlim.Tests.ViewModels
             var (vm, _, _, _) = CreateViewModel();
             await vm.LoadAsync(MakeRow(), new ProjectScopeModel { DisplayName = "MyApp", ProjectFullPath = @"C:\x\x.csproj" }, false, CancellationToken.None);
             Assert.Equal(2, vm.AvailableVersions.Count);
-            Assert.Equal(NuGetVersion.Parse("2.0.0"), vm.AvailableVersions[0]);
+            Assert.Equal(NuGetVersion.Parse("2.0.0"), vm.AvailableVersions[0].Version);
         }
 
         [Fact]

@@ -134,6 +134,11 @@ namespace NuGetManagerSlim.ToolWindows
 
                 _solutionOpenedHandler = solution =>
                 {
+                    // Always reset the scope dropdown to Browse when a solution
+                    // loads. We deliberately don't persist the scope between
+                    // sessions - users expect to start fresh on Browse.
+                    viewModel.ViewMode = PackageViewMode.Browse;
+
                     // When a solution opens with no active project (the common
                     // "just opened" state), seed the tool window with the
                     // read-only solution-wide aggregation so the user sees

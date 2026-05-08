@@ -316,7 +316,7 @@
             <!-- Package list -->
             <ListBox x:Name="PackageListBox"
                      ItemsSource="{Binding Packages}"
-                     SelectedItem="{Binding SelectedPackage}"
+                     SelectionMode="Extended"
                      VirtualizingStackPanel.IsVirtualizing="True"
                      VirtualizingStackPanel.VirtualizationMode="Recycling"
                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
@@ -325,12 +325,17 @@
                      AutomationProperties.Name="Package list"
                      HorizontalContentAlignment="Stretch">
                 <ListBox.Style>
-                    <!-- While a project switch / filter reload is in flight,
-                         fade and disable the previous list so it's clear new
-                         data is being loaded without flashing the list empty. -->
+                    <!-- While a project switch / filter reload / remote search
+                         is in flight, fade and disable the previous list so
+                         it's clear new data is being loaded without flashing
+                         the list empty. -->
                     <Style TargetType="ListBox" BasedOn="{StaticResource {x:Type ListBox}}">
                         <Style.Triggers>
                             <DataTrigger Binding="{Binding IsLoading}" Value="True">
+                                <Setter Property="Opacity" Value="0.45" />
+                                <Setter Property="IsHitTestVisible" Value="False" />
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding IsRemoteLoading}" Value="True">
                                 <Setter Property="Opacity" Value="0.45" />
                                 <Setter Property="IsHitTestVisible" Value="False" />
                             </DataTrigger>
@@ -430,6 +435,7 @@
                                                         <Condition Binding="{Binding HasUpdate}" Value="True" />
                                                         <Condition Binding="{Binding IsOperationInProgress}" Value="False" />
                                                         <Condition Binding="{Binding DataContext.IsReadOnlyScope, RelativeSource={RelativeSource AncestorType=ListBox}}" Value="False" />
+                                                        <Condition Binding="{Binding DataContext.HasMultiSelection, RelativeSource={RelativeSource AncestorType=ListBox}}" Value="False" />
                                                     </MultiDataTrigger.Conditions>
                                                     <Setter Property="Visibility" Value="Visible" />
                                                 </MultiDataTrigger>
@@ -457,6 +463,12 @@
                                                  the spinner is always shown (even after the mouse leaves). -->
                                             <DataTrigger Binding="{Binding IsOperationInProgress}" Value="True">
                                                 <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                            <!-- Hide the row's quick-action icons while a multi-select is
+                                                 active. The bulk Install / Update / Uninstall buttons in
+                                                 the detail pane own that interaction instead. -->
+                                            <DataTrigger Binding="{Binding DataContext.HasMultiSelection, RelativeSource={RelativeSource AncestorType=ListBox}}" Value="True">
+                                                <Setter Property="Visibility" Value="Hidden" />
                                             </DataTrigger>
                                         </Style.Triggers>
                                     </Style>
@@ -596,11 +608,53 @@
 
         <!-- F: Detail pane -->
         <Border Grid.Row="2" BorderThickness="0,1,0,1"
-                BorderBrush="{DynamicResource {x:Static vsshell:VsBrushes.CommandBarBorderKey}}"
+                BorderBrush="{DynamicResource {x:Static vsui:EnvironmentColors.PanelSeparatorBrushKey}}"
                 Background="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowBackgroundKey}}"
-                Visibility="{Binding HasSelectedPackage, Converter={StaticResource BoolToVis}}">
+                Visibility="{Binding HasDetailPane, Converter={StaticResource BoolToVis}}">
             <ScrollViewer x:Name="DetailScrollViewer" VerticalScrollBarVisibility="Auto" Padding="8,6">
-                <StackPanel>
+                <Grid>
+                    <!-- Multi-select summary: shown when more than one row is
+                         selected. Aggregated Install / Update / Uninstall
+                         buttons act on the subset of selected packages for
+                         which each operation makes sense. -->
+                    <StackPanel Visibility="{Binding HasMultiSelection, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Text="{Binding MultiSelection.Title}"
+                                   FontSize="15" FontWeight="Bold"
+                                   Margin="0,0,0,6" />
+                        <TextBlock Style="{StaticResource MutedTextStyle}"
+                                   Text="Selected packages:"
+                                   Margin="0,0,0,2" />
+                        <ItemsControl ItemsSource="{Binding MultiSelection.PackageIds}"
+                                      Margin="0,0,0,8">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding}"
+                                               Style="{StaticResource MutedTextStyle}"
+                                               Margin="0,1" />
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <WrapPanel Margin="0,0,0,6">
+                            <Button Content="{Binding MultiSelection.InstallButtonText}"
+                                    Command="{Binding MultiSelection.InstallCommand}"
+                                    Padding="10,4" Margin="0,0,4,0"
+                                    IsEnabled="{Binding MultiSelection.CanInstall}"
+                                    AutomationProperties.Name="Install selected packages" />
+                            <Button Content="{Binding MultiSelection.UpdateButtonText}"
+                                    Command="{Binding MultiSelection.UpdateCommand}"
+                                    Padding="10,4" Margin="0,0,4,0"
+                                    IsEnabled="{Binding MultiSelection.CanUpdate}"
+                                    AutomationProperties.Name="Update selected packages" />
+                            <Button Content="{Binding MultiSelection.UninstallButtonText}"
+                                    Command="{Binding MultiSelection.UninstallCommand}"
+                                    Padding="10,4"
+                                    IsEnabled="{Binding MultiSelection.CanUninstall}"
+                                    AutomationProperties.Name="Uninstall selected packages" />
+                        </WrapPanel>
+                    </StackPanel>
+
+                    <!-- Single-package detail: shown when exactly one row is selected. -->
+                    <StackPanel Visibility="{Binding HasSelectedPackage, Converter={StaticResource BoolToVis}}">
                     <!-- Package title + version dropdown + install button -->
                     <Grid Margin="0,0,0,6">
                         <Grid.ColumnDefinitions>
@@ -615,10 +669,39 @@
                                    TextTrimming="CharacterEllipsis" />
                         <ComboBox Grid.Column="1"
                                   ItemsSource="{Binding Detail.AvailableVersions}"
-                                  SelectedItem="{Binding Detail.SelectedVersion}"
+                                  SelectedItem="{Binding Detail.SelectedVersionItem}"
                                   MinWidth="100" Margin="8,0,0,0"
                                   VerticalAlignment="Center"
-                                  AutomationProperties.Name="Package version" />
+                                  AutomationProperties.Name="Package version">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate>
+                                    <!-- The drop-down items render with this template; the
+                                         selection box itself uses ToString() and shows the
+                                         plain version, so the highlight only appears in the
+                                         open list (which is what we want). -->
+                                    <TextBlock Text="{Binding DisplayText}">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Style.Triggers>
+                                                    <!-- Bold the installed version, but only while
+                                                         the dropdown is expanded - inside the closed
+                                                         selection box there's no ComboBoxItem ancestor,
+                                                         so this trigger doesn't fire and the collapsed
+                                                         text stays at the default weight. -->
+                                                    <MultiDataTrigger>
+                                                        <MultiDataTrigger.Conditions>
+                                                            <Condition Binding="{Binding IsInstalled}" Value="True" />
+                                                            <Condition Binding="{Binding RelativeSource={RelativeSource AncestorType=ComboBoxItem}, Path=IsVisible, FallbackValue=False}" Value="True" />
+                                                        </MultiDataTrigger.Conditions>
+                                                        <Setter Property="FontWeight" Value="Bold" />
+                                                    </MultiDataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
                         <Button Grid.Column="2"
                                 Command="{Binding Detail.InstallCommand}"
                                 Style="{StaticResource IconButtonStyle}"
@@ -703,7 +786,8 @@
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
                     </Expander>
-                </StackPanel>
+                    </StackPanel>
+                </Grid>
             </ScrollViewer>
         </Border>
 

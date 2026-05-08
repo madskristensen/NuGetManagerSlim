@@ -62,7 +62,7 @@
 
       <Button guid="NuGetManagerSlim" id="ViewModeUpdatesCommand" priority="0x0300" type="Button">
         <Parent guid="NuGetManagerSlim" id="ViewModeMenuGroup" />
-        <Icon guid="ImageCatalogGuid" id="Upload" />
+        <Icon guid="ImageCatalogGuid" id="StatusUpdateAvailable" />
         <CommandFlag>IconIsMoniker</CommandFlag>
         <Strings>
           <ButtonText>Updates available</ButtonText>
@@ -84,6 +84,7 @@
         <Parent guid="VSMainMenu" id="ProjectNode.AddGroup" />
         <Icon guid="ImageCatalogGuid" id="NuGet" />
         <CommandFlag>IconIsMoniker</CommandFlag>
+        <CommandFlag>DefaultInvisible</CommandFlag>
         <CommandFlag>DynamicVisibility</CommandFlag>
         <Strings>
           <ButtonText>Manage NuGet Packages (Slim)...</ButtonText>
@@ -93,6 +94,13 @@
     </Buttons>
 
   </Commands>
+
+  <VisibilityConstraints>
+    <!-- Show OpenForProjectCommand only when the selected project advertises
+         the .NET project capability. The context guid below is registered by
+         ProvideUIContextRule on NuGetManagerSlimPackage. -->
+    <VisibilityItem guid="NuGetManagerSlim" id="OpenForProjectCommand" context="DotNetProjectContext" />
+  </VisibilityConstraints>
 
   <Symbols>
     <GuidSymbol name="NuGetManagerSlim" value="{f6649f79-8c76-4df8-ae04-370c692ed6ed}">
@@ -112,6 +120,21 @@
 
       <IDSymbol name="ProjectContextGroup"                  value="0x1200" />
     </GuidSymbol>
+
+    <!--
+      ImageCatalogGuid moniker that ships in newer Visual Studio SDKs but is
+      not present in the KnownImageIds.vsct bundled with the build tools we
+      reference. Declaring it here lets the .vsct compiler resolve the name
+      for the Updates-available toolbar button. The numeric id matches
+      KnownMonikers.StatusUpdateAvailable in the runtime image catalog.
+    -->
+    <GuidSymbol name="ImageCatalogGuid" value="{ae27a6b0-e345-4288-96df-5eaf394ee369}">
+      <IDSymbol name="StatusUpdateAvailable" value="3970" />
+    </GuidSymbol>
+
+    <!-- UIContext registered via ProvideUIContextRule on NuGetManagerSlimPackage.
+         The GUID must match UIContextGuids.DotNetProjectContextString. -->
+    <GuidSymbol name="DotNetProjectContext" value="{9b254846-1ea2-451c-b07c-4ac6a8c64f37}" />
   </Symbols>
 
 </CommandTable>

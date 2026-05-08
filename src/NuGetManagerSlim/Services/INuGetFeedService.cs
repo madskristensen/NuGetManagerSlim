@@ -33,6 +33,13 @@ namespace NuGetManagerSlim.Services
             string packageId,
             CancellationToken cancellationToken);
 
+        /// <summary>
+        /// Returns the cached "latest" metadata for <paramref name="packageId"/> when
+        /// available so the Updates view can render rows that were already enriched by
+        /// a prior Browse / Installed pass without a fresh round trip.
+        /// </summary>
+        bool TryGetCachedLatestMetadata(string packageId, out PackageModel? metadata);
+
         Task<PackageModel?> GetPackageMetadataAsync(
             string packageId,
             NuGetVersion version,

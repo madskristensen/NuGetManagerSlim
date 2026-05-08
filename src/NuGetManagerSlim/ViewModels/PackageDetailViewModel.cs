@@ -31,12 +31,13 @@ namespace NuGetManagerSlim.ViewModels
         [ObservableProperty] private bool _hasProjectUrl;
         [ObservableProperty] private bool _hasPublished;
         [ObservableProperty] private NuGetVersion? _selectedVersion;
+        [ObservableProperty] private VersionListItem? _selectedVersionItem;
         [ObservableProperty] private bool _canInstall;
         [ObservableProperty] private bool _canUpdate;
         [ObservableProperty] private bool _canUninstall;
         [ObservableProperty] private bool _canUpdateAllProjects;
 
-        public ObservableCollection<NuGetVersion> AvailableVersions { get; } = [];
+        public ObservableCollection<VersionListItem> AvailableVersions { get; } = [];
         public ObservableCollection<ProjectMembershipViewModel> ProjectMemberships { get; } = [];
         public ObservableCollection<PackageDependencyInfo> Dependencies { get; } = [];
         public ObservableCollection<DependencyGroupViewModel> DependencyGroups { get; } = [];
@@ -70,10 +71,15 @@ namespace NuGetManagerSlim.ViewModels
             _suppressVersionReload = true;
             try
             {
+                var installed = row.InstalledVersion;
                 foreach (var v in versions)
-                    AvailableVersions.Add(v);
+                    AvailableVersions.Add(new VersionListItem(v, installed != null && v.Equals(installed)));
 
-                SelectedVersion = row.InstalledVersion ?? (AvailableVersions.Count > 0 ? AvailableVersions[0] : null);
+                var initial = installed ?? (AvailableVersions.Count > 0 ? AvailableVersions[0].Version : null);
+                SelectedVersion = initial;
+                SelectedVersionItem = initial == null
+                    ? null
+                    : AvailableVersions.FirstOrDefault(i => i.Version.Equals(initial));
             }
             finally
             {
@@ -98,6 +104,14 @@ namespace NuGetManagerSlim.ViewModels
             _versionMetadataCts = new CancellationTokenSource();
             var ct = _versionMetadataCts.Token;
             _ = LoadVersionMetadataAsync(value, ct);
+        }
+
+        partial void OnSelectedVersionItemChanged(VersionListItem? value)
+        {
+            // Keep the legacy NuGetVersion-typed SelectedVersion in sync so
+            // the rest of the VM (Install / Update commands, metadata
+            // reload) doesn't need to know about the wrapper type.
+            SelectedVersion = value?.Version;
         }
 
         private async Task LoadVersionMetadataAsync(NuGetVersion? version, CancellationToken cancellationToken)
@@ -268,5 +282,22 @@ namespace NuGetManagerSlim.ViewModels
         public string TargetFramework { get; init; } = string.Empty;
         public string Header { get; init; } = string.Empty;
         public System.Collections.Generic.IReadOnlyList<PackageDependencyInfo> Items { get; init; } = [];
+    }
+
+    // Wraps a NuGetVersion for the detail-pane version dropdown so the item
+    // template can highlight the row matching the project's installed version.
+    public class VersionListItem
+    {
+        public VersionListItem(NuGetVersion version, bool isInstalled)
+        {
+            Version = version;
+            IsInstalled = isInstalled;
+        }
+
+        public NuGetVersion Version { get; }
+        public bool IsInstalled { get; }
+        public string DisplayText => Version.ToNormalizedString();
+
+        public override string ToString() => DisplayText;
     }
 }

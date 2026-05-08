@@ -377,6 +377,22 @@ namespace NuGetManagerSlim.Services
             return result;
         }
 
+        public bool TryGetCachedLatestMetadata(string packageId, out PackageModel? metadata)
+        {
+            metadata = null;
+            if (string.IsNullOrEmpty(packageId)) return false;
+            var key = "latest:" + packageId;
+            lock (_metadataCacheLock)
+            {
+                if (_metadataCache.TryGetValue(key, out var hit) && hit.ExpiresUtc > DateTime.UtcNow)
+                {
+                    metadata = hit.Value;
+                    return true;
+                }
+            }
+            return false;
+        }
+
         private async Task<PackageModel?> GetPackageMetadataCoreAsync(
             string packageId,
             CancellationToken cancellationToken)

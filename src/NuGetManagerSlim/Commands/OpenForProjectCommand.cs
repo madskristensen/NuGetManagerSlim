@@ -1,7 +1,5 @@
 using System;
 using System.IO;
-using System.Linq;
-using System.Threading;
 using System.Threading.Tasks;
 using Community.VisualStudio.Toolkit;
 using Microsoft.VisualStudio.Shell;
@@ -12,44 +10,10 @@ namespace NuGetManagerSlim.Commands
     [Command(PackageIds.OpenForProjectCommand)]
     internal sealed class OpenForProjectCommand : BaseCommand<OpenForProjectCommand>
     {
-        // Cached visibility, refreshed asynchronously so BeforeQueryStatus
-        // never blocks the UI thread on solution/DTE access.
-        private static volatile bool _cachedVisible;
-        private static int _refreshing;
-
-        protected override void BeforeQueryStatus(EventArgs e)
-        {
-            Command.Visible = _cachedVisible;
-            Command.Enabled = _cachedVisible;
-
-            // Fire-and-forget refresh; next query cycle will see the new value.
-            // Guarded so concurrent BeforeQueryStatus calls don't pile up work.
-            if (Interlocked.CompareExchange(ref _refreshing, 1, 0) == 0)
-            {
-                // FileAndForget is the recommended fault-handling pattern for
-                // genuinely fire-and-forget JoinableTask work; the analyzer
-                // can't see that the result is consumed.
-#pragma warning disable VSSDK007
-                ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
-                {
-                    try
-                    {
-                        var item = await VS.Solutions.GetActiveItemAsync();
-                        _cachedVisible = item is Project project && IsManagedDotNetProject(project.FullPath);
-                    }
-                    catch (Exception ex)
-                    {
-                        _cachedVisible = false;
-                        await ex.LogAsync();
-                    }
-                    finally
-                    {
-                        Interlocked.Exchange(ref _refreshing, 0);
-                    }
-                }).FileAndForget("vs/nugetmanagerslim/openforprojectcommand/refresh");
-#pragma warning restore VSSDK007
-            }
-        }
+        // Visibility is controlled declaratively via <VisibilityConstraints> in
+        // VSCommandTable.vsct combined with a ProvideUIContextRule attribute on
+        // NuGetManagerSlimPackage that activates when the selected project has
+        // the .NET project capability. No BeforeQueryStatus override is needed.
 
         protected override async Task ExecuteAsync(OleMenuCmdEventArgs e)
         {
@@ -75,15 +39,6 @@ namespace NuGetManagerSlim.Commands
             {
                 await ex.LogAsync();
             }
-        }
-
-        private static bool IsManagedDotNetProject(string? fullPath)
-        {
-            if (string.IsNullOrEmpty(fullPath)) return false;
-            var ext = Path.GetExtension(fullPath);
-            return string.Equals(ext, ".csproj", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(ext, ".vbproj", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(ext, ".fsproj", StringComparison.OrdinalIgnoreCase);
         }
     }
 }
