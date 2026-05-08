@@ -77,6 +77,7 @@ namespace NuGetManagerSlim.ToolWindows
             private RestoreMonitorService? _restoreMonitor;
             private PropertyChangedEventHandler? _viewModelPropertyChanged;
             private Action? _solutionClosedHandler;
+            private Action<Community.VisualStudio.Toolkit.Solution?>? _solutionOpenedHandler;
             private EventHandler<SelectionChangedEventArgs>? _selectionChangedHandler;
 
             public Pane()
@@ -131,32 +132,124 @@ namespace NuGetManagerSlim.ToolWindows
                 };
                 VS.Events.SolutionEvents.OnAfterCloseSolution += _solutionClosedHandler;
 
+                _solutionOpenedHandler = solution =>
+                {
+                    // When a solution opens with no active project (the common
+                    // "just opened" state), seed the tool window with the
+                    // read-only solution-wide aggregation so the user sees
+                    // packages immediately.
+#pragma warning disable VSSDK007
+                    ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+                    {
+                        try { await ApplySolutionScopeIfIdleAsync(viewModel); }
+                        catch (Exception ex) { await ex.LogAsync(); }
+                    }).FileAndForget("vs/nugetmanagerslim/toolwindow/onsolutionopened");
+#pragma warning restore VSSDK007
+                };
+                VS.Events.SolutionEvents.OnAfterOpenSolution += _solutionOpenedHandler;
+
                 _selectionChangedHandler = (s, e) =>
                 {
-                    _ = ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+#pragma warning disable VSSDK007
+                    ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
                     {
                         try
                         {
                             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
                             var project = await VS.Solutions.GetActiveProjectAsync();
-                            if (project == null || string.IsNullOrEmpty(project.FullPath)) return;
-                            if (!IsManagedDotNetProject(project.FullPath)) return;
-                            if (string.Equals(viewModel.CurrentProject?.ProjectFullPath, project.FullPath, StringComparison.OrdinalIgnoreCase))
+                            if (project != null && !string.IsNullOrEmpty(project.FullPath) && IsManagedDotNetProject(project.FullPath))
+                            {
+                                if (string.Equals(viewModel.CurrentProject?.ProjectFullPath, project.FullPath, StringComparison.OrdinalIgnoreCase))
+                                    return;
+
+                                var displayName = project.Name;
+                                if (string.IsNullOrEmpty(displayName) || displayName!.IndexOfAny(new[] { '\\', '/' }) >= 0)
+                                    displayName = System.IO.Path.GetFileNameWithoutExtension(project.FullPath);
+
+                                await viewModel.SetCurrentProjectAsync(project.FullPath!, displayName);
                                 return;
+                            }
 
-                            var displayName = project.Name;
-                            if (string.IsNullOrEmpty(displayName) || displayName!.IndexOfAny(new[] { '\\', '/' }) >= 0)
-                                displayName = System.IO.Path.GetFileNameWithoutExtension(project.FullPath);
-
-                            await viewModel.SetCurrentProjectAsync(project.FullPath!, displayName);
+                            // Selection moved off any managed project (e.g.
+                            // user clicked the Solution node or a non-managed
+                            // project). If we don't already have a scope,
+                            // fall back to the solution-wide aggregation.
+                            if (viewModel.CurrentProject == null)
+                            {
+                                await ApplySolutionScopeIfIdleAsync(viewModel);
+                            }
                         }
                         catch (Exception ex)
                         {
                             await ex.LogAsync();
                         }
-                    });
+                    }).FileAndForget("vs/nugetmanagerslim/toolwindow/selectionchanged");
+#pragma warning restore VSSDK007
                 };
                 VS.Events.SelectionEvents.SelectionChanged += _selectionChangedHandler;
+
+                // Cover the case where a solution is already open by the time
+                // the tool window is first shown (no SelectionChanged or
+                // OnAfterOpenSolution will fire in that path).
+#pragma warning disable VSSDK007
+                ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+                {
+                    try { await ApplySolutionScopeIfIdleAsync(viewModel); }
+                    catch (Exception ex) { await ex.LogAsync(); }
+                }).FileAndForget("vs/nugetmanagerslim/toolwindow/initialscope");
+#pragma warning restore VSSDK007
+            }
+
+            private static async Task ApplySolutionScopeIfIdleAsync(MainViewModel viewModel)
+            {
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                if (viewModel.CurrentProject != null) return;
+
+                var projectPaths = await GetSolutionManagedProjectPathsAsync();
+                if (projectPaths.Count == 0) return;
+
+                var displayName = await GetSolutionDisplayNameAsync();
+                await viewModel.SetSolutionScopeAsync(displayName, projectPaths);
+            }
+
+            private static async Task<string> GetSolutionDisplayNameAsync()
+            {
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                try
+                {
+                    var dte = await VS.GetServiceAsync<EnvDTE.DTE, EnvDTE.DTE>();
+                    var slnPath = dte?.Solution?.FullName;
+                    if (!string.IsNullOrEmpty(slnPath))
+                        return System.IO.Path.GetFileNameWithoutExtension(slnPath);
+                }
+                catch (Exception ex)
+                {
+                    await ex.LogAsync();
+                }
+                return "Solution";
+            }
+
+            private static async Task<IReadOnlyList<string>> GetSolutionManagedProjectPathsAsync()
+            {
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                var paths = new List<string>();
+                try
+                {
+                    var projects = await VS.Solutions.GetAllProjectsAsync();
+                    if (projects == null) return paths;
+                    foreach (var p in projects)
+                    {
+                        if (p == null) continue;
+                        if (string.IsNullOrEmpty(p.FullPath)) continue;
+                        if (!IsManagedDotNetProject(p.FullPath)) continue;
+                        paths.Add(p.FullPath!);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    await ex.LogAsync();
+                }
+                return paths;
             }
 
             protected override void Dispose(bool disposing)
@@ -169,6 +262,8 @@ namespace NuGetManagerSlim.ToolWindows
                             _viewModel.PropertyChanged -= _viewModelPropertyChanged;
                         if (_solutionClosedHandler != null)
                             VS.Events.SolutionEvents.OnAfterCloseSolution -= _solutionClosedHandler;
+                        if (_solutionOpenedHandler != null)
+                            VS.Events.SolutionEvents.OnAfterOpenSolution -= _solutionOpenedHandler;
                         if (_selectionChangedHandler != null)
                             VS.Events.SelectionEvents.SelectionChanged -= _selectionChangedHandler;
 
@@ -189,6 +284,7 @@ namespace NuGetManagerSlim.ToolWindows
 
                         _viewModelPropertyChanged = null;
                         _solutionClosedHandler = null;
+                        _solutionOpenedHandler = null;
                         _selectionChangedHandler = null;
                         _viewModel = null;
                         _feedService = null;

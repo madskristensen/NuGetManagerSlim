@@ -88,6 +88,12 @@ namespace NuGetManagerSlim.ViewModels
         public bool HasSelectedPackage => SelectedPackage != null;
         public bool HasProject => CurrentProject != null;
 
+        // True when the active scope is the whole solution. Solution scope is
+        // read-only: install / update / uninstall affordances are hidden so the
+        // user can browse what's installed across projects without accidentally
+        // applying a change to an ambiguous target.
+        public bool IsReadOnlyScope => CurrentProject?.IsSolutionScope == true;
+
         public PackageViewMode ViewMode
         {
             get
@@ -248,6 +254,27 @@ namespace NuGetManagerSlim.ViewModels
             await ReloadPackagesAsync();
         }
 
+        // Switches the tool window to a read-only solution-wide view that
+        // aggregates installed packages across every managed .NET project in
+        // the solution. Used when the user has a solution loaded but no active
+        // project (Solution node selected, or VS just opened a solution).
+        public async Task SetSolutionScopeAsync(string solutionDisplayName, IReadOnlyList<string> projectFullPaths, CancellationToken cancellationToken = default)
+        {
+            if (projectFullPaths == null || projectFullPaths.Count == 0)
+            {
+                ClearCurrentProject();
+                return;
+            }
+
+            CurrentProject = new ProjectScopeModel
+            {
+                DisplayName = string.IsNullOrEmpty(solutionDisplayName) ? "Solution" : solutionDisplayName,
+                IsSolutionScope = true,
+                ProjectFullPaths = projectFullPaths,
+            };
+            await ReloadPackagesAsync();
+        }
+
         public void ClearCurrentProject()
         {
             CurrentProject = null;
@@ -315,11 +342,14 @@ namespace NuGetManagerSlim.ViewModels
         partial void OnCurrentProjectChanged(ProjectScopeModel? value)
         {
             _restoreMonitor.StopMonitoring();
-            if (value != null)
+            // Restore monitoring is per-project; skip it for the aggregated
+            // solution view since there's no single obj\ to watch.
+            if (value != null && !value.IsSolutionScope)
             {
                 _restoreMonitor.StartMonitoring(value);
             }
             OnPropertyChanged(nameof(HasProject));
+            OnPropertyChanged(nameof(IsReadOnlyScope));
         }
 
         partial void OnSelectedPackageChanged(PackageRowViewModel? value)
@@ -884,6 +914,11 @@ namespace NuGetManagerSlim.ViewModels
         private async Task QuickUpdateAsync(PackageRowViewModel? row)
         {
             if (row == null) return;
+            if (IsReadOnlyScope)
+            {
+                SetStatus("Switch to a single project to update packages.");
+                return;
+            }
             row.IsOperationInProgress = true;
             try
             {
@@ -911,6 +946,11 @@ namespace NuGetManagerSlim.ViewModels
         private async Task QuickInstallAsync(PackageRowViewModel? row)
         {
             if (row == null) return;
+            if (IsReadOnlyScope)
+            {
+                SetStatus("Switch to a single project to install packages.");
+                return;
+            }
             var version = row.LatestStableVersion ?? row.LatestPrereleaseVersion;
             if (version == null) return;
 
@@ -943,6 +983,11 @@ namespace NuGetManagerSlim.ViewModels
         private async Task QuickUninstallAsync(PackageRowViewModel? row)
         {
             if (row == null) return;
+            if (IsReadOnlyScope)
+            {
+                SetStatus("Switch to a single project to uninstall packages.");
+                return;
+            }
             row.IsOperationInProgress = true;
             try
             {
@@ -1023,7 +1068,9 @@ namespace NuGetManagerSlim.ViewModels
             }
             if (!FilterInstalled && !FilterUpdates && string.IsNullOrWhiteSpace(SearchText))
             {
-                EmptyStateMessage = "Search for a package to get started, or toggle Installed to see what's in your project.";
+                EmptyStateMessage = IsReadOnlyScope
+                    ? "Search for a package, or toggle Installed to see what's in your solution. Select a project to install or update."
+                    : "Search for a package to get started, or toggle Installed to see what's in your project.";
                 return;
             }
             if (FilterUpdates && Packages.Count == 0)

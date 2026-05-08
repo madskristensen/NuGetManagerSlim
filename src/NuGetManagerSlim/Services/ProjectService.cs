@@ -33,8 +33,10 @@ namespace NuGetManagerSlim.Services
         {
             try
             {
-                if (scope == null || string.IsNullOrEmpty(scope.ProjectFullPath))
-                    return [];
+                if (scope == null) return [];
+
+                var projectPaths = ResolveScopePaths(scope);
+                if (projectPaths.Count == 0) return [];
 
                 // The project file is parsed with synchronous XDocument.Load, which
                 // would otherwise stall the UI thread on every filter toggle / project
@@ -42,16 +44,16 @@ namespace NuGetManagerSlim.Services
                 // the dispatcher.
                 await TaskScheduler.Default;
 
-                var projectPath = scope.ProjectFullPath!;
                 cancellationToken.ThrowIfCancellationRequested();
 
                 var byId = new Dictionary<string, PackageModel>(StringComparer.OrdinalIgnoreCase);
-                foreach (var pkg in ReadInstalledFromProject(projectPath))
+                foreach (var projectPath in projectPaths)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    if (!byId.ContainsKey(pkg.PackageId))
+                    foreach (var pkg in ReadInstalledFromProject(projectPath))
                     {
-                        byId[pkg.PackageId] = pkg;
+                        cancellationToken.ThrowIfCancellationRequested();
+                        MergeInstalled(byId, pkg);
                     }
                 }
 
@@ -152,112 +154,25 @@ namespace NuGetManagerSlim.Services
         {
             try
             {
-                if (scope == null || string.IsNullOrEmpty(scope.ProjectFullPath))
-                    return [];
+                if (scope == null) return [];
+
+                var projectPaths = ResolveScopePaths(scope);
+                if (projectPaths.Count == 0) return [];
 
                 await TaskScheduler.Default;
 
-                var projectPath = scope.ProjectFullPath!;
-                var projectDir = Path.GetDirectoryName(projectPath);
-                if (string.IsNullOrEmpty(projectDir)) return [];
-
-                var assetsPath = Path.Combine(projectDir!, "obj", "project.assets.json");
-                if (!File.Exists(assetsPath)) return [];
-
-                cancellationToken.ThrowIfCancellationRequested();
-
-                using var fs = new FileStream(assetsPath, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, useAsync: true);
-                using var doc = await JsonDocument.ParseAsync(fs, default, cancellationToken).ConfigureAwait(false);
-                var root = doc.RootElement;
-
-                // Direct PackageReferences declared in the project. Anything in
-                // `targets` not in this set is transitive.
-                var direct = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                if (root.TryGetProperty("project", out var projectEl)
-                    && projectEl.TryGetProperty("frameworks", out var fws)
-                    && fws.ValueKind == JsonValueKind.Object)
+                var aggregated = new Dictionary<string, PackageModel>(StringComparer.OrdinalIgnoreCase);
+                foreach (var projectPath in projectPaths)
                 {
-                    foreach (var fw in fws.EnumerateObject())
-                    {
-                        if (fw.Value.TryGetProperty("dependencies", out var deps)
-                            && deps.ValueKind == JsonValueKind.Object)
-                        {
-                            foreach (var d in deps.EnumerateObject())
-                                direct.Add(d.Name);
-                        }
-                    }
-                }
-
-                // Build a flat package map and reverse-edge list (child -> parents)
-                // by scanning the first target framework. Multi-targeted projects
-                // typically share the same closure across TFMs; using just one
-                // keeps parsing fast.
-                var nodes = new Dictionary<string, TransitiveNode>(StringComparer.OrdinalIgnoreCase);
-                if (root.TryGetProperty("targets", out var targets) && targets.ValueKind == JsonValueKind.Object)
-                {
-                    foreach (var tf in targets.EnumerateObject())
-                    {
-                        foreach (var entry in tf.Value.EnumerateObject())
-                        {
-                            cancellationToken.ThrowIfCancellationRequested();
-                            var key = entry.Name;
-                            var slash = key.IndexOf('/');
-                            if (slash <= 0) continue;
-                            var id = key.Substring(0, slash);
-                            var verStr = key.Substring(slash + 1);
-                            if (!entry.Value.TryGetProperty("type", out var typeEl)
-                                || typeEl.ValueKind != JsonValueKind.String
-                                || typeEl.GetString() != "package")
-                                continue;
-                            NuGetVersion.TryParse(verStr, out var ver);
-
-                            if (!nodes.TryGetValue(id, out var node))
-                            {
-                                node = new TransitiveNode { Id = id, Version = ver };
-                                nodes[id] = node;
-                            }
-                            else if (node.Version == null && ver != null)
-                            {
-                                node.Version = ver;
-                            }
-
-                            if (entry.Value.TryGetProperty("dependencies", out var children)
-                                && children.ValueKind == JsonValueKind.Object)
-                            {
-                                foreach (var child in children.EnumerateObject())
-                                {
-                                    if (!nodes.TryGetValue(child.Name, out var childNode))
-                                    {
-                                        childNode = new TransitiveNode { Id = child.Name };
-                                        nodes[child.Name] = childNode;
-                                    }
-                                    if (!childNode.Parents.Contains(id, StringComparer.OrdinalIgnoreCase))
-                                        childNode.Parents.Add(id);
-                                }
-                            }
-                        }
-                        break;
-                    }
-                }
-
-                var projectName = Path.GetFileNameWithoutExtension(projectPath);
-                var result = new List<PackageModel>(nodes.Count);
-                foreach (var kvp in nodes)
-                {
-                    if (direct.Contains(kvp.Key)) continue;
                     cancellationToken.ThrowIfCancellationRequested();
-                    var ancestor = FindDirectAncestor(kvp.Key, nodes, direct);
-                    result.Add(new PackageModel
+                    var perProject = await ReadTransitivesForProjectAsync(projectPath, cancellationToken).ConfigureAwait(false);
+                    foreach (var pkg in perProject)
                     {
-                        PackageId = kvp.Value.Id,
-                        InstalledVersion = kvp.Value.Version,
-                        IsTransitive = true,
-                        RequiredByPackageId = ancestor,
-                        SourceName = projectName,
-                    });
+                        MergeInstalled(aggregated, pkg);
+                    }
                 }
 
-                return result
+                return aggregated.Values
                     .OrderBy(p => p.PackageId, StringComparer.OrdinalIgnoreCase)
                     .ToList();
             }
@@ -270,6 +185,140 @@ namespace NuGetManagerSlim.Services
                 await ex.LogAsync();
                 return [];
             }
+        }
+
+        private static IReadOnlyList<string> ResolveScopePaths(ProjectScopeModel scope)
+        {
+            if (scope.IsSolutionScope)
+            {
+                if (scope.ProjectFullPaths == null) return Array.Empty<string>();
+                return scope.ProjectFullPaths
+                    .Where(p => !string.IsNullOrEmpty(p) && IsManagedDotNetProject(p))
+                    .ToList();
+            }
+            if (string.IsNullOrEmpty(scope.ProjectFullPath)) return Array.Empty<string>();
+            return new[] { scope.ProjectFullPath! };
+        }
+
+        // Aggregation rule for solution scope: dedupe by package id and keep
+        // the highest installed version observed across projects so the row
+        // reads as "what's installed somewhere in this solution".
+        private static void MergeInstalled(Dictionary<string, PackageModel> byId, PackageModel pkg)
+        {
+            if (string.IsNullOrEmpty(pkg.PackageId)) return;
+            if (!byId.TryGetValue(pkg.PackageId, out var existing))
+            {
+                byId[pkg.PackageId] = pkg;
+                return;
+            }
+
+            var newer = pkg.InstalledVersion != null
+                && (existing.InstalledVersion == null || pkg.InstalledVersion > existing.InstalledVersion);
+
+            if (newer)
+            {
+                byId[pkg.PackageId] = pkg;
+            }
+        }
+
+        private async Task<IReadOnlyList<PackageModel>> ReadTransitivesForProjectAsync(
+            string projectPath,
+            CancellationToken cancellationToken)
+        {
+            var projectDir = Path.GetDirectoryName(projectPath);
+            if (string.IsNullOrEmpty(projectDir)) return [];
+
+            var assetsPath = Path.Combine(projectDir!, "obj", "project.assets.json");
+            if (!File.Exists(assetsPath)) return [];
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            using var fs = new FileStream(assetsPath, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, useAsync: true);
+            using var doc = await JsonDocument.ParseAsync(fs, default, cancellationToken).ConfigureAwait(false);
+            var root = doc.RootElement;
+
+            var direct = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (root.TryGetProperty("project", out var projectEl)
+                && projectEl.TryGetProperty("frameworks", out var fws)
+                && fws.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var fw in fws.EnumerateObject())
+                {
+                    if (fw.Value.TryGetProperty("dependencies", out var deps)
+                        && deps.ValueKind == JsonValueKind.Object)
+                    {
+                        foreach (var d in deps.EnumerateObject())
+                            direct.Add(d.Name);
+                    }
+                }
+            }
+
+            var nodes = new Dictionary<string, TransitiveNode>(StringComparer.OrdinalIgnoreCase);
+            if (root.TryGetProperty("targets", out var targets) && targets.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var tf in targets.EnumerateObject())
+                {
+                    foreach (var entry in tf.Value.EnumerateObject())
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        var key = entry.Name;
+                        var slash = key.IndexOf('/');
+                        if (slash <= 0) continue;
+                        var id = key.Substring(0, slash);
+                        var verStr = key.Substring(slash + 1);
+                        if (!entry.Value.TryGetProperty("type", out var typeEl)
+                            || typeEl.ValueKind != JsonValueKind.String
+                            || typeEl.GetString() != "package")
+                            continue;
+                        NuGetVersion.TryParse(verStr, out var ver);
+
+                        if (!nodes.TryGetValue(id, out var node))
+                        {
+                            node = new TransitiveNode { Id = id, Version = ver };
+                            nodes[id] = node;
+                        }
+                        else if (node.Version == null && ver != null)
+                        {
+                            node.Version = ver;
+                        }
+
+                        if (entry.Value.TryGetProperty("dependencies", out var children)
+                            && children.ValueKind == JsonValueKind.Object)
+                        {
+                            foreach (var child in children.EnumerateObject())
+                            {
+                                if (!nodes.TryGetValue(child.Name, out var childNode))
+                                {
+                                    childNode = new TransitiveNode { Id = child.Name };
+                                    nodes[child.Name] = childNode;
+                                }
+                                if (!childNode.Parents.Contains(id, StringComparer.OrdinalIgnoreCase))
+                                    childNode.Parents.Add(id);
+                            }
+                        }
+                    }
+                    break;
+                }
+            }
+
+            var projectName = Path.GetFileNameWithoutExtension(projectPath);
+            var result = new List<PackageModel>(nodes.Count);
+            foreach (var kvp in nodes)
+            {
+                if (direct.Contains(kvp.Key)) continue;
+                cancellationToken.ThrowIfCancellationRequested();
+                var ancestor = FindDirectAncestor(kvp.Key, nodes, direct);
+                result.Add(new PackageModel
+                {
+                    PackageId = kvp.Value.Id,
+                    InstalledVersion = kvp.Value.Version,
+                    IsTransitive = true,
+                    RequiredByPackageId = ancestor,
+                    SourceName = projectName,
+                });
+            }
+
+            return result;
         }
 
         private sealed class TransitiveNode

@@ -79,9 +79,12 @@ namespace NuGetManagerSlim.ViewModels
 
             await LoadVersionMetadataAsync(SelectedVersion, cancellationToken);
 
-            CanInstall = !row.IsInstalled;
-            CanUpdate = row.HasUpdate;
-            CanUninstall = row.IsInstalled && !row.IsTransitive;
+            // In solution scope ProjectFullPath is null; install / update /
+            // uninstall require a single target project, so disable them.
+            var hasProjectTarget = !string.IsNullOrEmpty(_projectFullPath);
+            CanInstall = hasProjectTarget && !row.IsInstalled;
+            CanUpdate = hasProjectTarget && row.HasUpdate;
+            CanUninstall = hasProjectTarget && row.IsInstalled && !row.IsTransitive;
             CanUpdateAllProjects = false;
         }
 

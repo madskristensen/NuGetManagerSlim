@@ -416,6 +416,7 @@
                                                     <MultiDataTrigger.Conditions>
                                                         <Condition Binding="{Binding HasUpdate}" Value="True" />
                                                         <Condition Binding="{Binding IsOperationInProgress}" Value="False" />
+                                                        <Condition Binding="{Binding DataContext.IsReadOnlyScope, RelativeSource={RelativeSource AncestorType=ListBox}}" Value="False" />
                                                     </MultiDataTrigger.Conditions>
                                                     <Setter Property="Visibility" Value="Visible" />
                                                 </MultiDataTrigger>
@@ -495,6 +496,7 @@
                                                     <MultiDataTrigger.Conditions>
                                                         <Condition Binding="{Binding CanQuickInstall}" Value="True" />
                                                         <Condition Binding="{Binding IsOperationInProgress}" Value="False" />
+                                                        <Condition Binding="{Binding DataContext.IsReadOnlyScope, RelativeSource={RelativeSource AncestorType=ListBox}}" Value="False" />
                                                     </MultiDataTrigger.Conditions>
                                                     <Setter Property="Visibility" Value="Visible" />
                                                 </MultiDataTrigger>
@@ -516,6 +518,7 @@
                                                     <MultiDataTrigger.Conditions>
                                                         <Condition Binding="{Binding CanQuickUninstall}" Value="True" />
                                                         <Condition Binding="{Binding IsOperationInProgress}" Value="False" />
+                                                        <Condition Binding="{Binding DataContext.IsReadOnlyScope, RelativeSource={RelativeSource AncestorType=ListBox}}" Value="False" />
                                                     </MultiDataTrigger.Conditions>
                                                     <Setter Property="Visibility" Value="Visible" />
                                                 </MultiDataTrigger>
