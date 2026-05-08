@@ -397,81 +397,125 @@ namespace NuGetManagerSlim.Services
             string packageId,
             CancellationToken cancellationToken)
         {
-            foreach (var source in GetEnabledSources())
+            var sources = GetEnabledSources();
+            if (sources.Count == 0) return null;
+
+            // Fan out across enabled sources in parallel and return the first
+            // non-null result. The serial loop this replaces could block for the
+            // full timeout of a slow first source before reaching the next one,
+            // which made enrichment painful when an internal feed was listed
+            // ahead of nuget.org.
+            using var perCallCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            var token = perCallCts.Token;
+            var tasks = sources
+                .Select(src => FetchLatestMetadataFromSourceAsync(src, packageId, token))
+                .ToList();
+
+            try
             {
-                try
+                while (tasks.Count > 0)
                 {
-                    var repository = Repository.Factory.GetCoreV3(source.Source);
-                    var resource = await repository.GetResourceAsync<PackageMetadataResource>(cancellationToken).ConfigureAwait(false);
-                    if (resource == null) continue;
-
-                    var metadata = await resource.GetMetadataAsync(
-                        packageId, includePrerelease: true, includeUnlisted: false,
-                        _cacheContext, _logger, cancellationToken).ConfigureAwait(false);
-
-                    var latest = metadata.OrderByDescending(m => m.Identity.Version).FirstOrDefault();
-                    if (latest == null) continue;
-
-                    var deps = latest.DependencySets
-                        .SelectMany(ds => ds.Packages.Select(p => new PackageDependencyInfo
-                        {
-                            PackageId = p.Id,
-                            VersionRange = p.VersionRange?.ToString() ?? "*",
-                            TargetFramework = ds.TargetFramework?.GetShortFolderName() ?? string.Empty,
-                        }))
-                        .ToList();
-
-                    // PackageMetadataResource exposes per-version download counts which are
-                    // typically null for most v3 feeds. Query the search resource as a
-                    // fallback so installed packages still pick up the cumulative total.
-                    long downloadCount = latest.DownloadCount ?? 0;
-                    if (downloadCount == 0)
+                    var done = await Task.WhenAny(tasks).ConfigureAwait(false);
+                    tasks.Remove(done);
+                    if (done.Status == TaskStatus.RanToCompletion && done.Result != null)
                     {
-                        try
-                        {
-                            var searchResource = await repository.GetResourceAsync<PackageSearchResource>(cancellationToken).ConfigureAwait(false);
-                            if (searchResource != null)
-                            {
-                                var hits = await searchResource.SearchAsync(
-                                    "packageid:" + packageId,
-                                    new SearchFilter(includePrerelease: true),
-                                    0, 1, _logger, cancellationToken).ConfigureAwait(false);
-                                var hit = hits?.FirstOrDefault();
-                                if (hit?.DownloadCount != null) downloadCount = hit.DownloadCount.Value;
-                            }
-                        }
-                        catch (OperationCanceledException) { throw; }
-                        catch { /* search fallback is best-effort */ }
+                        perCallCts.Cancel();
+                        return done.Result;
                     }
-
-                    return new PackageModel
-                    {
-                        PackageId = latest.Identity.Id,
-                        LatestStableVersion = latest.Identity.Version.IsPrerelease ? null : latest.Identity.Version,
-                        LatestPrereleaseVersion = latest.Identity.Version,
-                        Description = latest.Description,
-                        Authors = latest.Authors,
-                        LicenseExpression = latest.LicenseMetadata?.License,
-                        LicenseUrl = latest.LicenseUrl?.ToString(),
-                        DownloadCount = downloadCount,
-                        SourceName = source.Name,
-                        ProjectUrl = latest.ProjectUrl?.ToString(),
-                        IconUrl = latest.IconUrl?.ToString(),
-                        Published = latest.Published,
-                        Dependencies = deps,
-                    };
                 }
-                catch (OperationCanceledException)
-                {
-                    throw;
-                }
-                catch
-                {
-                    // Try next source
-                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
             }
 
             return null;
+        }
+
+        private async Task<PackageModel?> FetchLatestMetadataFromSourceAsync(
+            PackageSourceModel source,
+            string packageId,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                var repository = Repository.Factory.GetCoreV3(source.Source);
+                var resource = await repository.GetResourceAsync<PackageMetadataResource>(cancellationToken).ConfigureAwait(false);
+                if (resource == null) return null;
+
+                var metadata = await resource.GetMetadataAsync(
+                    packageId, includePrerelease: true, includeUnlisted: false,
+                    _cacheContext, _logger, cancellationToken).ConfigureAwait(false);
+
+                var latest = metadata.OrderByDescending(m => m.Identity.Version).FirstOrDefault();
+                if (latest == null) return null;
+
+                var deps = latest.DependencySets
+                    .SelectMany(ds => ds.Packages.Select(p => new PackageDependencyInfo
+                    {
+                        PackageId = p.Id,
+                        VersionRange = p.VersionRange?.ToString() ?? "*",
+                        TargetFramework = ds.TargetFramework?.GetShortFolderName() ?? string.Empty,
+                    }))
+                    .ToList();
+
+                // PackageMetadataResource exposes per-version download counts which are
+                // typically null for most v3 feeds. Only fall back to the search resource
+                // for nuget.org - private/Azure Artifacts/GitHub feeds don't expose
+                // cumulative download counts there either, so the extra round-trip is
+                // pure overhead (and per-package, on every enrichment pass).
+                long downloadCount = latest.DownloadCount ?? 0;
+                if (downloadCount == 0 && IsNuGetOrgSource(source))
+                {
+                    try
+                    {
+                        var searchResource = await repository.GetResourceAsync<PackageSearchResource>(cancellationToken).ConfigureAwait(false);
+                        if (searchResource != null)
+                        {
+                            var hits = await searchResource.SearchAsync(
+                                "packageid:" + packageId,
+                                new SearchFilter(includePrerelease: true),
+                                0, 1, _logger, cancellationToken).ConfigureAwait(false);
+                            var hit = hits?.FirstOrDefault();
+                            if (hit?.DownloadCount != null) downloadCount = hit.DownloadCount.Value;
+                        }
+                    }
+                    catch (OperationCanceledException) { throw; }
+                    catch { /* search fallback is best-effort */ }
+                }
+
+                return new PackageModel
+                {
+                    PackageId = latest.Identity.Id,
+                    LatestStableVersion = latest.Identity.Version.IsPrerelease ? null : latest.Identity.Version,
+                    LatestPrereleaseVersion = latest.Identity.Version,
+                    Description = latest.Description,
+                    Authors = latest.Authors,
+                    LicenseExpression = latest.LicenseMetadata?.License,
+                    LicenseUrl = latest.LicenseUrl?.ToString(),
+                    DownloadCount = downloadCount,
+                    SourceName = source.Name,
+                    ProjectUrl = latest.ProjectUrl?.ToString(),
+                    IconUrl = latest.IconUrl?.ToString(),
+                    Published = latest.Published,
+                    Dependencies = deps,
+                };
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                // Source failed - the fan-out continues with the others.
+                return null;
+            }
+        }
+
+        private static bool IsNuGetOrgSource(PackageSourceModel source)
+        {
+            if (string.IsNullOrEmpty(source.Source)) return false;
+            return source.Source.IndexOf("nuget.org", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         public async Task<PackageModel?> GetPackageMetadataAsync(
@@ -496,86 +540,116 @@ namespace NuGetManagerSlim.Services
             NuGetVersion version,
             CancellationToken cancellationToken)
         {
+            var sources = GetEnabledSources();
+            if (sources.Count == 0) return null;
+
             var identity = new global::NuGet.Packaging.Core.PackageIdentity(packageId, version);
-            foreach (var source in GetEnabledSources())
+            using var perCallCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            var token = perCallCts.Token;
+            var tasks = sources
+                .Select(src => FetchVersionedMetadataFromSourceAsync(src, packageId, identity, token))
+                .ToList();
+
+            try
             {
-                try
+                while (tasks.Count > 0)
                 {
-                    var repository = Repository.Factory.GetCoreV3(source.Source);
-                    var resource = await repository.GetResourceAsync<PackageMetadataResource>(cancellationToken).ConfigureAwait(false);
-                    if (resource == null) continue;
-
-                    // Pull the full registration index for the package once and pick
-                    // the matching version. This is what GetMetadataAsync(identity, ...)
-                    // does internally for v3, but doing it explicitly lets us fall back
-                    // to the latest available metadata when the exact installed version
-                    // isn't on this source (unlisted, removed, or only on another feed) -
-                    // otherwise the detail pane ends up empty for installed packages.
-                    var allMetadata = (await resource.GetMetadataAsync(
-                        packageId, includePrerelease: true, includeUnlisted: true,
-                        _cacheContext, _logger, cancellationToken).ConfigureAwait(false))?.ToList();
-
-                    if (allMetadata == null || allMetadata.Count == 0) continue;
-
-                    var meta = allMetadata.FirstOrDefault(m => m.Identity.Equals(identity))
-                        ?? allMetadata.OrderByDescending(m => m.Identity.Version).First();
-
-                    var deps = meta.DependencySets
-                        .SelectMany(ds => ds.Packages.Select(p => new PackageDependencyInfo
-                        {
-                            PackageId = p.Id,
-                            VersionRange = p.VersionRange?.ToString() ?? "*",
-                            TargetFramework = ds.TargetFramework?.GetShortFolderName() ?? string.Empty,
-                        }))
-                        .ToList();
-
-                    // PackageMetadataResource exposes per-version download counts which
-                    // are typically null for v3 feeds. Query the search resource as a
-                    // fallback so the cumulative total surfaces in the detail pane.
-                    long downloadCount = meta.DownloadCount ?? 0;
-                    if (downloadCount == 0)
+                    var done = await Task.WhenAny(tasks).ConfigureAwait(false);
+                    tasks.Remove(done);
+                    if (done.Status == TaskStatus.RanToCompletion && done.Result != null)
                     {
-                        try
-                        {
-                            var searchResource = await repository.GetResourceAsync<PackageSearchResource>(cancellationToken).ConfigureAwait(false);
-                            if (searchResource != null)
-                            {
-                                var hits = await searchResource.SearchAsync(
-                                    "packageid:" + packageId,
-                                    new SearchFilter(includePrerelease: true),
-                                    0, 1, _logger, cancellationToken).ConfigureAwait(false);
-                                var hit = hits?.FirstOrDefault();
-                                if (hit?.DownloadCount != null) downloadCount = hit.DownloadCount.Value;
-                            }
-                        }
-                        catch (OperationCanceledException) { throw; }
-                        catch { /* search fallback is best-effort */ }
+                        perCallCts.Cancel();
+                        return done.Result;
                     }
-
-                    return new PackageModel
-                    {
-                        PackageId = meta.Identity.Id,
-                        LatestStableVersion = meta.Identity.Version.IsPrerelease ? null : meta.Identity.Version,
-                        LatestPrereleaseVersion = meta.Identity.Version,
-                        Description = meta.Description,
-                        Authors = meta.Authors,
-                        LicenseExpression = meta.LicenseMetadata?.License,
-                        LicenseUrl = meta.LicenseUrl?.ToString(),
-                        DownloadCount = downloadCount,
-                        SourceName = source.Name,
-                        ProjectUrl = meta.ProjectUrl?.ToString(),
-                        IconUrl = meta.IconUrl?.ToString(),
-                        Dependencies = deps,
-                    };
                 }
-                catch (OperationCanceledException) { throw; }
-                catch
-                {
-                    // Try next source
-                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
             }
 
             return null;
+        }
+
+        private async Task<PackageModel?> FetchVersionedMetadataFromSourceAsync(
+            PackageSourceModel source,
+            string packageId,
+            global::NuGet.Packaging.Core.PackageIdentity identity,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                var repository = Repository.Factory.GetCoreV3(source.Source);
+                var resource = await repository.GetResourceAsync<PackageMetadataResource>(cancellationToken).ConfigureAwait(false);
+                if (resource == null) return null;
+
+                // Pull the full registration index for the package once and pick
+                // the matching version. This is what GetMetadataAsync(identity, ...)
+                // does internally for v3, but doing it explicitly lets us fall back
+                // to the latest available metadata when the exact installed version
+                // isn't on this source (unlisted, removed, or only on another feed) -
+                // otherwise the detail pane ends up empty for installed packages.
+                var allMetadata = (await resource.GetMetadataAsync(
+                    packageId, includePrerelease: true, includeUnlisted: true,
+                    _cacheContext, _logger, cancellationToken).ConfigureAwait(false))?.ToList();
+
+                if (allMetadata == null || allMetadata.Count == 0) return null;
+
+                var meta = allMetadata.FirstOrDefault(m => m.Identity.Equals(identity))
+                    ?? allMetadata.OrderByDescending(m => m.Identity.Version).First();
+
+                var deps = meta.DependencySets
+                    .SelectMany(ds => ds.Packages.Select(p => new PackageDependencyInfo
+                    {
+                        PackageId = p.Id,
+                        VersionRange = p.VersionRange?.ToString() ?? "*",
+                        TargetFramework = ds.TargetFramework?.GetShortFolderName() ?? string.Empty,
+                    }))
+                    .ToList();
+
+                // Same nuget.org-only guard as the latest-metadata path: skip the
+                // search-resource fallback on feeds that never expose download counts.
+                long downloadCount = meta.DownloadCount ?? 0;
+                if (downloadCount == 0 && IsNuGetOrgSource(source))
+                {
+                    try
+                    {
+                        var searchResource = await repository.GetResourceAsync<PackageSearchResource>(cancellationToken).ConfigureAwait(false);
+                        if (searchResource != null)
+                        {
+                            var hits = await searchResource.SearchAsync(
+                                "packageid:" + packageId,
+                                new SearchFilter(includePrerelease: true),
+                                0, 1, _logger, cancellationToken).ConfigureAwait(false);
+                            var hit = hits?.FirstOrDefault();
+                            if (hit?.DownloadCount != null) downloadCount = hit.DownloadCount.Value;
+                        }
+                    }
+                    catch (OperationCanceledException) { throw; }
+                    catch { /* search fallback is best-effort */ }
+                }
+
+                return new PackageModel
+                {
+                    PackageId = meta.Identity.Id,
+                    LatestStableVersion = meta.Identity.Version.IsPrerelease ? null : meta.Identity.Version,
+                    LatestPrereleaseVersion = meta.Identity.Version,
+                    Description = meta.Description,
+                    Authors = meta.Authors,
+                    LicenseExpression = meta.LicenseMetadata?.License,
+                    LicenseUrl = meta.LicenseUrl?.ToString(),
+                    DownloadCount = downloadCount,
+                    SourceName = source.Name,
+                    ProjectUrl = meta.ProjectUrl?.ToString(),
+                    IconUrl = meta.IconUrl?.ToString(),
+                    Dependencies = deps,
+                };
+            }
+            catch (OperationCanceledException) { throw; }
+            catch
+            {
+                return null;
+            }
         }
 
         public async Task<IReadOnlyList<NuGetVersion>> GetVersionsAsync(

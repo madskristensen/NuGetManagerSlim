@@ -55,7 +55,7 @@ namespace NuGetManagerSlim.Services
             await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                EnsureLoaded();
+                await EnsureLoadedAsync(cancellationToken).ConfigureAwait(false);
                 return _entries!
                     .Select(ToModel)
                     .ToList();
@@ -74,7 +74,7 @@ namespace NuGetManagerSlim.Services
             await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                EnsureLoaded();
+                await EnsureLoadedAsync(cancellationToken).ConfigureAwait(false);
 
                 var existing = _entries!.FindIndex(e =>
                     string.Equals(e.PackageId, package.PackageId, StringComparison.OrdinalIgnoreCase));
@@ -99,7 +99,7 @@ namespace NuGetManagerSlim.Services
                 if (_entries.Count > MaxEntries)
                     _entries.RemoveRange(MaxEntries, _entries.Count - MaxEntries);
 
-                Save();
+                await SaveAsync(cancellationToken).ConfigureAwait(false);
             }
             finally
             {
@@ -107,7 +107,7 @@ namespace NuGetManagerSlim.Services
             }
         }
 
-        private void EnsureLoaded()
+        private async Task EnsureLoadedAsync(CancellationToken cancellationToken)
         {
             if (_entries != null) return;
 
@@ -115,12 +115,17 @@ namespace NuGetManagerSlim.Services
             {
                 if (File.Exists(_filePath))
                 {
-                    using var stream = File.OpenRead(_filePath);
-                    _entries = JsonSerializer.Deserialize<List<MruEntry>>(stream, SerializerOptions)
-                               ?? new List<MruEntry>();
+                    using var stream = new FileStream(
+                        _filePath, FileMode.Open, FileAccess.Read, FileShare.Read,
+                        bufferSize: 4096, useAsync: true);
+                    _entries = await JsonSerializer
+                        .DeserializeAsync<List<MruEntry>>(stream, SerializerOptions, cancellationToken)
+                        .ConfigureAwait(false)
+                        ?? new List<MruEntry>();
                     return;
                 }
             }
+            catch (OperationCanceledException) { throw; }
             catch
             {
                 // Corrupt file - start fresh rather than failing the UI.
@@ -129,7 +134,7 @@ namespace NuGetManagerSlim.Services
             _entries = new List<MruEntry>();
         }
 
-        private void Save()
+        private async Task SaveAsync(CancellationToken cancellationToken)
         {
             try
             {
@@ -138,15 +143,20 @@ namespace NuGetManagerSlim.Services
                     Directory.CreateDirectory(dir);
 
                 var tmp = _filePath + ".tmp";
-                using (var stream = File.Create(tmp))
+                using (var stream = new FileStream(
+                    tmp, FileMode.Create, FileAccess.Write, FileShare.None,
+                    bufferSize: 4096, useAsync: true))
                 {
-                    JsonSerializer.Serialize(stream, _entries, SerializerOptions);
+                    await JsonSerializer
+                        .SerializeAsync(stream, _entries, SerializerOptions, cancellationToken)
+                        .ConfigureAwait(false);
                 }
 
                 if (File.Exists(_filePath))
                     File.Delete(_filePath);
                 File.Move(tmp, _filePath);
             }
+            catch (OperationCanceledException) { throw; }
             catch
             {
                 // MRU is best-effort; never block install/update on a write failure.
