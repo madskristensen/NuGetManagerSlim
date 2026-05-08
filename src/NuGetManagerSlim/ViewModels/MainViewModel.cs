@@ -50,6 +50,10 @@ namespace NuGetManagerSlim.ViewModels
         // change) so a fast switch between projects doesn't let a stale
         // installed-list overwrite the newer one when it eventually completes.
         private CancellationTokenSource? _filterCts;
+        // Set by the ViewMode setter while it adjusts the two backing filter
+        // flags so we issue exactly one ReloadPackagesAsync afterwards instead
+        // of one per flag change (which would cancel the first mid-flight).
+        private bool _suppressFilterReload;
         private System.Timers.Timer? _debounceTimer;
         private readonly List<string> _searchHistory = [];
         private int _searchHistoryIndex = -1;
@@ -85,7 +89,8 @@ namespace NuGetManagerSlim.ViewModels
         public ObservableCollection<PackageRowViewModel> Packages => _packages;
         private readonly BulkObservableCollection<PackageRowViewModel> _packages = [];
         public ObservableCollection<PackageSourceModel> PackageSources { get; } = [];
-        public ObservableCollection<string> OperationLog { get; } = [];
+        public ObservableCollection<string> OperationLog => _operationLog;
+        private readonly BulkObservableCollection<string> _operationLog = [];
 
         public bool HasPackages => Packages.Count > 0;
         public bool IsEmptyState => !IsLoading && !ShowSkeleton && Packages.Count == 0;
@@ -105,9 +110,18 @@ namespace NuGetManagerSlim.ViewModels
             }
             set
             {
-                FilterUpdates = value == PackageViewMode.Updates;
-                FilterInstalled = value == PackageViewMode.Installed || value == PackageViewMode.Updates;
+                _suppressFilterReload = true;
+                try
+                {
+                    FilterUpdates = value == PackageViewMode.Updates;
+                    FilterInstalled = value == PackageViewMode.Installed || value == PackageViewMode.Updates;
+                }
+                finally
+                {
+                    _suppressFilterReload = false;
+                }
                 OnPropertyChanged();
+                _ = ReloadPackagesAsync();
             }
         }
 
@@ -316,11 +330,13 @@ namespace NuGetManagerSlim.ViewModels
         partial void OnFilterInstalledChanged(bool value)
         {
             OnPropertyChanged(nameof(ViewMode));
+            if (_suppressFilterReload) return;
             _ = ReloadPackagesAsync();
         }
         partial void OnFilterUpdatesChanged(bool value)
         {
             OnPropertyChanged(nameof(ViewMode));
+            if (_suppressFilterReload) return;
             _ = ReloadPackagesAsync();
         }
         partial void OnFilterPrereleaseChanged(bool value) => _ = ReloadPackagesAsync();
@@ -1105,9 +1121,15 @@ namespace NuGetManagerSlim.ViewModels
         {
             OperationLog.Add(message);
             // Cap the log so long-running sessions don't accumulate unbounded
-            // strings and slow down the bound ItemsControl.
-            while (OperationLog.Count > MaxOperationLog)
-                OperationLog.RemoveAt(0);
+            // strings and slow down the bound list. Trim in a single Reset
+            // event rather than firing N CollectionChanged(Remove, 0) shifts.
+            if (_operationLog.Count > MaxOperationLog)
+            {
+                var keep = new List<string>(MaxOperationLog);
+                for (int i = _operationLog.Count - MaxOperationLog; i < _operationLog.Count; i++)
+                    keep.Add(_operationLog[i]);
+                _operationLog.ReplaceAll(keep);
+            }
         }
 
         // Updates the in-window StatusMessage and mirrors the message to the

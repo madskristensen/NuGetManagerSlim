@@ -30,8 +30,11 @@ namespace NuGetManagerSlim.ToolWindows
             // Reset the detail pane scroll position whenever a new package is
             // loaded so the user always lands at the title - otherwise the
             // pane retains the previous package's scroll offset and may open
-            // mid-dependency-list.
-            viewModel.PropertyChanged += OnViewModelPropertyChanged;
+            // mid-dependency-list. Subscribe on Loaded / unsubscribe on
+            // Unloaded so the VM never holds a delegate reference back to a
+            // recycled control instance (theme change, dock/undock).
+            Loaded += OnControlLoaded;
+            Unloaded += OnControlUnloaded;
 
             ApplyDetailPaneVisibility(viewModel.HasDetailPane);
 
@@ -45,6 +48,17 @@ namespace NuGetManagerSlim.ToolWindows
                 view.GroupDescriptions.Add(
                     new PropertyGroupDescription(nameof(PackageRowViewModel.GroupKey)));
             }
+        }
+
+        private void OnControlLoaded(object sender, RoutedEventArgs e)
+        {
+            _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+            _viewModel.PropertyChanged += OnViewModelPropertyChanged;
+        }
+
+        private void OnControlUnloaded(object sender, RoutedEventArgs e)
+        {
+            _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
         }
 
         private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)

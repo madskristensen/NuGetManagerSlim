@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading;
@@ -37,10 +38,13 @@ namespace NuGetManagerSlim.ViewModels
         [ObservableProperty] private bool _canUninstall;
         [ObservableProperty] private bool _canUpdateAllProjects;
 
-        public ObservableCollection<VersionListItem> AvailableVersions { get; } = [];
+        public ObservableCollection<VersionListItem> AvailableVersions => _availableVersions;
+        private readonly BulkObservableCollection<VersionListItem> _availableVersions = [];
         public ObservableCollection<ProjectMembershipViewModel> ProjectMemberships { get; } = [];
-        public ObservableCollection<PackageDependencyInfo> Dependencies { get; } = [];
-        public ObservableCollection<DependencyGroupViewModel> DependencyGroups { get; } = [];
+        public ObservableCollection<PackageDependencyInfo> Dependencies => _dependencies;
+        private readonly BulkObservableCollection<PackageDependencyInfo> _dependencies = [];
+        public ObservableCollection<DependencyGroupViewModel> DependencyGroups => _dependencyGroups;
+        private readonly BulkObservableCollection<DependencyGroupViewModel> _dependencyGroups = [];
 
         private CancellationTokenSource? _versionMetadataCts;
         private bool _suppressVersionReload;
@@ -61,9 +65,9 @@ namespace NuGetManagerSlim.ViewModels
         {
             PackageId = row.PackageId;
             _projectFullPath = scope?.ProjectFullPath;
-            AvailableVersions.Clear();
-            Dependencies.Clear();
-            DependencyGroups.Clear();
+            _availableVersions.ReplaceAll(System.Array.Empty<VersionListItem>());
+            _dependencies.ReplaceAll(System.Array.Empty<PackageDependencyInfo>());
+            _dependencyGroups.ReplaceAll(System.Array.Empty<DependencyGroupViewModel>());
             ProjectMemberships.Clear();
 
             // Load versions
@@ -72,8 +76,10 @@ namespace NuGetManagerSlim.ViewModels
             try
             {
                 var installed = row.InstalledVersion;
+                var items = new List<VersionListItem>(versions.Count);
                 foreach (var v in versions)
-                    AvailableVersions.Add(new VersionListItem(v, installed != null && v.Equals(installed)));
+                    items.Add(new VersionListItem(v, installed != null && v.Equals(installed)));
+                _availableVersions.ReplaceAll(items);
 
                 var initial = installed ?? (AvailableVersions.Count > 0 ? AvailableVersions[0].Version : null);
                 SelectedVersion = initial;
@@ -142,26 +148,22 @@ namespace NuGetManagerSlim.ViewModels
                     ? FormatDownloadCount(metadata.DownloadCount)
                     : "N/A";
 
-                Dependencies.Clear();
-                foreach (var dep in metadata.Dependencies)
-                    Dependencies.Add(dep);
+                _dependencies.ReplaceAll(metadata.Dependencies);
 
-                DependencyGroups.Clear();
                 // Group by TFM the same way the built-in NuGet Package Manager does:
                 // one collapsible-style header per target framework, dependencies listed
                 // beneath it. Keeps the dependency list legible for multi-targeted packages.
-                var groups = metadata.Dependencies
+                var grouped = metadata.Dependencies
                     .GroupBy(d => d.TargetFramework ?? string.Empty)
-                    .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase);
-                foreach (var g in groups)
-                {
-                    DependencyGroups.Add(new DependencyGroupViewModel
+                    .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
+                    .Select(g => new DependencyGroupViewModel
                     {
                         TargetFramework = g.Key,
                         Header = string.IsNullOrEmpty(g.Key) ? "Any" : g.Key,
                         Items = g.ToList(),
-                    });
-                }
+                    })
+                    .ToList();
+                _dependencyGroups.ReplaceAll(grouped);
             }
             catch (OperationCanceledException) { }
             catch (Exception ex)
