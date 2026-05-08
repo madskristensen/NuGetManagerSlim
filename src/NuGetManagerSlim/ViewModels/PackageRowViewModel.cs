@@ -1,6 +1,8 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using NuGet.Versioning;
 using NuGetManagerSlim.Models;
+using NuGetManagerSlim.Services;
+using System.Windows.Media;
 
 namespace NuGetManagerSlim.ViewModels
 {
@@ -11,6 +13,12 @@ namespace NuGetManagerSlim.ViewModels
 
         [ObservableProperty]
         private bool _isOperationInProgress;
+
+        // Driven by the local-filter pass that runs synchronously on every
+        // keystroke so the visible list reacts immediately, before the debounced
+        // remote search comes back.
+        [ObservableProperty]
+        private bool _isLocallyVisible = true;
 
         public PackageRowViewModel(PackageModel model)
         {
@@ -23,8 +31,11 @@ namespace NuGetManagerSlim.ViewModels
             if (!string.IsNullOrEmpty(metadata.IconUrl))
             {
                 _iconUrlOverride = metadata.IconUrl;
+                _iconRequested = false;
+                _icon = null;
                 OnPropertyChanged(nameof(IconUrl));
                 OnPropertyChanged(nameof(HasIcon));
+                OnPropertyChanged(nameof(Icon));
             }
             if (string.IsNullOrEmpty(_model.Authors) && !string.IsNullOrEmpty(metadata.Authors))
             {
@@ -94,6 +105,36 @@ namespace NuGetManagerSlim.ViewModels
         public string? IconUrl => _iconUrlOverride ?? _model.IconUrl;
 
         public bool HasIcon => !string.IsNullOrEmpty(IconUrl);
+
+        // Decoded-once, frozen, display-sized BitmapImage. Bound directly to the
+        // Image control in the row template so WPF doesn't re-decode the source
+        // bytes for every recycled container.
+        private ImageSource? _icon;
+        private bool _iconRequested;
+        public ImageSource? Icon
+        {
+            get
+            {
+                if (!_iconRequested && HasIcon)
+                {
+                    _iconRequested = true;
+                    _ = LoadIconAsync();
+                }
+                return _icon;
+            }
+        }
+
+        private async System.Threading.Tasks.Task LoadIconAsync()
+        {
+            var url = IconUrl;
+            if (string.IsNullOrEmpty(url)) return;
+            var image = await IconCacheService.Instance.GetIconAsync(url).ConfigureAwait(true);
+            if (image != null)
+            {
+                _icon = image;
+                OnPropertyChanged(nameof(Icon));
+            }
+        }
 
         public bool CanQuickInstall => !IsInstalled
             && (_model.LatestStableVersion != null || _model.LatestPrereleaseVersion != null);

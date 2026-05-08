@@ -64,7 +64,8 @@ namespace NuGetManagerSlim.ViewModels
         [ObservableProperty] private PackageRowViewModel? _selectedPackage;
         [ObservableProperty] private PackageDetailViewModel? _detail;
 
-        public ObservableCollection<PackageRowViewModel> Packages { get; } = [];
+        public ObservableCollection<PackageRowViewModel> Packages => _packages;
+        private readonly BulkObservableCollection<PackageRowViewModel> _packages = [];
         public ObservableCollection<PackageSourceModel> PackageSources { get; } = [];
         public ObservableCollection<string> OperationLog { get; } = [];
 
@@ -146,7 +147,7 @@ namespace NuGetManagerSlim.ViewModels
         public void ClearCurrentProject()
         {
             CurrentProject = null;
-            Packages.Clear();
+            _packages.ReplaceAll(System.Linq.Enumerable.Empty<PackageRowViewModel>());
             Detail = null;
             SelectedPackage = null;
             UpdateEmptyState();
@@ -156,8 +157,32 @@ namespace NuGetManagerSlim.ViewModels
 
         partial void OnSearchTextChanged(string value)
         {
+            ApplyLocalFilter(value);
             _debounceTimer?.Stop();
             _debounceTimer?.Start();
+        }
+
+        // Synchronous client-side filter that hides rows that don't match the
+        // current query. Runs on every keystroke so the visible list reacts
+        // immediately while the debounced remote search is still in flight.
+        private void ApplyLocalFilter(string? text)
+        {
+            var query = text?.Trim();
+            if (string.IsNullOrEmpty(query))
+            {
+                foreach (var row in _packages)
+                {
+                    if (!row.IsLocallyVisible) row.IsLocallyVisible = true;
+                }
+                return;
+            }
+
+            foreach (var row in _packages)
+            {
+                var match = row.PackageId != null
+                    && row.PackageId.IndexOf(query, System.StringComparison.OrdinalIgnoreCase) >= 0;
+                if (row.IsLocallyVisible != match) row.IsLocallyVisible = match;
+            }
         }
 
         partial void OnFilterInstalledChanged(bool value)
@@ -317,9 +342,7 @@ namespace NuGetManagerSlim.ViewModels
                 if (FilterUpdates)
                     rows = rows.Where(r => r.HasUpdate).ToList();
 
-                Packages.Clear();
-                foreach (var row in rows.OrderBy(r => r.IsTransitive).ThenBy(r => r.PackageId))
-                    Packages.Add(row);
+                _packages.ReplaceAll(rows.OrderBy(r => r.IsTransitive).ThenBy(r => r.PackageId));
 
                 EnrichInstalledMetadataInBackground(Packages.ToList());
                 SeedMruFromInstalled(installed);
@@ -465,7 +488,7 @@ namespace NuGetManagerSlim.ViewModels
 
         private void ApplyRemoteResults(IReadOnlyList<PackageModel> results, Dictionary<string, PackageModel>? installedById = null)
         {
-            Packages.Clear();
+            var newRows = new List<PackageRowViewModel>(results.Count);
             foreach (var m in results)
             {
                 var model = m;
@@ -495,11 +518,16 @@ namespace NuGetManagerSlim.ViewModels
                         Dependencies = m.Dependencies,
                     };
                 }
-                Packages.Add(new PackageRowViewModel(model));
+                newRows.Add(new PackageRowViewModel(model));
             }
+
+            // Single Reset instead of Clear + N Add: collapses 51 CollectionChanged
+            // events (and 51 layout passes) into one when 50 results land.
+            _packages.ReplaceAll(newRows);
 
             OnPropertyChanged(nameof(HasPackages));
             OnPropertyChanged(nameof(IsEmptyState));
+            OnPropertyChanged(nameof(ShowSkeleton));
             UpdateEmptyState();
         }
 

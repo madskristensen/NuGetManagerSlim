@@ -40,6 +40,58 @@ namespace NuGetManagerSlim.Services
             public IReadOnlyList<PackageModel> Results = Array.Empty<PackageModel>();
         }
 
+        private void StoreMetadata(string key, PackageModel? value)
+        {
+            lock (_metadataCacheLock)
+            {
+                if (_metadataCache.Count >= MetadataCacheMaxEntries)
+                {
+                    var oldestKey = string.Empty;
+                    var oldestExp = DateTime.MaxValue;
+                    foreach (var kvp in _metadataCache)
+                    {
+                        if (kvp.Value.ExpiresUtc < oldestExp)
+                        {
+                            oldestExp = kvp.Value.ExpiresUtc;
+                            oldestKey = kvp.Key;
+                        }
+                    }
+                    if (oldestKey.Length > 0) _metadataCache.Remove(oldestKey);
+                }
+                _metadataCache[key] = new MetadataCacheEntry
+                {
+                    ExpiresUtc = DateTime.UtcNow.Add(MetadataCacheTtl),
+                    Value = value,
+                };
+            }
+        }
+
+        private void StoreVersions(string key, IReadOnlyList<NuGetVersion> value)
+        {
+            lock (_versionsCacheLock)
+            {
+                if (_versionsCache.Count >= MetadataCacheMaxEntries)
+                {
+                    var oldestKey = string.Empty;
+                    var oldestExp = DateTime.MaxValue;
+                    foreach (var kvp in _versionsCache)
+                    {
+                        if (kvp.Value.ExpiresUtc < oldestExp)
+                        {
+                            oldestExp = kvp.Value.ExpiresUtc;
+                            oldestKey = kvp.Key;
+                        }
+                    }
+                    if (oldestKey.Length > 0) _versionsCache.Remove(oldestKey);
+                }
+                _versionsCache[key] = new VersionsCacheEntry
+                {
+                    ExpiresUtc = DateTime.UtcNow.Add(MetadataCacheTtl),
+                    Value = value,
+                };
+            }
+        }
+
         private static string BuildSearchCacheKey(
             string query,
             bool includePrerelease,
@@ -104,12 +156,34 @@ namespace NuGetManagerSlim.Services
         // The flag auto-clears after that call.
         private int _bypassNextNetworkFetch;
 
+        // Per-session metadata + versions caches keyed by package id. Both layers
+        // are wired to InvalidateCache() so a user-initiated Refresh punches
+        // through them too.
+        private static readonly TimeSpan MetadataCacheTtl = TimeSpan.FromMinutes(15);
+        private const int MetadataCacheMaxEntries = 256;
+
+        private sealed class MetadataCacheEntry
+        {
+            public DateTime ExpiresUtc;
+            public PackageModel? Value;
+        }
+
+        private sealed class VersionsCacheEntry
+        {
+            public DateTime ExpiresUtc;
+            public IReadOnlyList<NuGetVersion> Value = Array.Empty<NuGetVersion>();
+        }
+
+        private readonly Dictionary<string, MetadataCacheEntry> _metadataCache = new(StringComparer.OrdinalIgnoreCase);
+        private readonly object _metadataCacheLock = new();
+        private readonly Dictionary<string, VersionsCacheEntry> _versionsCache = new(StringComparer.OrdinalIgnoreCase);
+        private readonly object _versionsCacheLock = new();
+
         public void InvalidateCache()
         {
-            lock (_searchCacheLock)
-            {
-                _searchCache.Clear();
-            }
+            lock (_searchCacheLock) _searchCache.Clear();
+            lock (_metadataCacheLock) _metadataCache.Clear();
+            lock (_versionsCacheLock) _versionsCache.Clear();
             System.Threading.Interlocked.Exchange(ref _bypassNextNetworkFetch, 1);
         }
 
@@ -233,6 +307,22 @@ namespace NuGetManagerSlim.Services
             string packageId,
             CancellationToken cancellationToken)
         {
+            var key = "latest:" + (packageId ?? string.Empty);
+            lock (_metadataCacheLock)
+            {
+                if (_metadataCache.TryGetValue(key, out var hit) && hit.ExpiresUtc > DateTime.UtcNow)
+                    return hit.Value;
+            }
+
+            var result = await GetPackageMetadataCoreAsync(packageId ?? string.Empty, cancellationToken).ConfigureAwait(false);
+            StoreMetadata(key, result);
+            return result;
+        }
+
+        private async Task<PackageModel?> GetPackageMetadataCoreAsync(
+            string packageId,
+            CancellationToken cancellationToken)
+        {
             foreach (var source in GetEnabledSources())
             {
                 try
@@ -291,6 +381,23 @@ namespace NuGetManagerSlim.Services
             NuGetVersion version,
             CancellationToken cancellationToken)
         {
+            var key = $"versioned:{packageId}@{version?.ToNormalizedString()}";
+            lock (_metadataCacheLock)
+            {
+                if (_metadataCache.TryGetValue(key, out var hit) && hit.ExpiresUtc > DateTime.UtcNow)
+                    return hit.Value;
+            }
+
+            var result = await GetPackageMetadataCoreAsync(packageId ?? string.Empty, version!, cancellationToken).ConfigureAwait(false);
+            StoreMetadata(key, result);
+            return result;
+        }
+
+        private async Task<PackageModel?> GetPackageMetadataCoreAsync(
+            string packageId,
+            NuGetVersion version,
+            CancellationToken cancellationToken)
+        {
             var identity = new global::NuGet.Packaging.Core.PackageIdentity(packageId, version);
             foreach (var source in GetEnabledSources())
             {
@@ -339,6 +446,23 @@ namespace NuGetManagerSlim.Services
         }
 
         public async Task<IReadOnlyList<NuGetVersion>> GetVersionsAsync(
+            string packageId,
+            bool includePrerelease,
+            CancellationToken cancellationToken)
+        {
+            var key = $"{packageId}|{includePrerelease}";
+            lock (_versionsCacheLock)
+            {
+                if (_versionsCache.TryGetValue(key, out var hit) && hit.ExpiresUtc > DateTime.UtcNow)
+                    return hit.Value;
+            }
+
+            var fresh = await GetVersionsCoreAsync(packageId, includePrerelease, cancellationToken).ConfigureAwait(false);
+            StoreVersions(key, fresh);
+            return fresh;
+        }
+
+        private async Task<IReadOnlyList<NuGetVersion>> GetVersionsCoreAsync(
             string packageId,
             bool includePrerelease,
             CancellationToken cancellationToken)

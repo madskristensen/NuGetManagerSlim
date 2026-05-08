@@ -206,6 +206,11 @@
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsLocallyVisible}" Value="False">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                </DataTrigger>
+            </Style.Triggers>
         </Style>
     </UserControl.Resources>
     <Grid Background="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowBackgroundKey}}">
@@ -319,7 +324,7 @@
                                         </Style>
                                     </imaging:CrispImage.Style>
                                 </imaging:CrispImage>
-                                <Image Source="{Binding IconUrl, IsAsync=True, TargetNullValue={x:Null}, FallbackValue={x:Null}}"
+                                <Image Source="{Binding Icon, TargetNullValue={x:Null}, FallbackValue={x:Null}}"
                                        Width="28" Height="28"
                                        Stretch="Uniform"
                                        HorizontalAlignment="Center" VerticalAlignment="Center"
@@ -372,33 +377,110 @@
                                             <DataTrigger Binding="{Binding IsKeyboardFocusWithin, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
                                                 <Setter Property="Visibility" Value="Visible" />
                                             </DataTrigger>
+                                            <!-- Stay visible while an install/update/uninstall is running so
+                                                 the spinner is always shown (even after the mouse leaves). -->
+                                            <DataTrigger Binding="{Binding IsOperationInProgress}" Value="True">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
                                         </Style.Triggers>
                                     </Style>
                                 </StackPanel.Style>
-                                <Button Style="{StaticResource IconButtonStyle}"
-                                        Command="{Binding DataContext.QuickInstallCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
+
+                                <!-- Spinner shown while a row-level operation is running. Replaces the
+                                     three action buttons with a single rotating progress glyph.
+                                     Vector-drawn (Ellipse with dashed stroke) so it stays crisp under
+                                     the continuous RotateTransform; CrispImage's pixel snapping makes
+                                     raster icons look blurry while spinning. -->
+                                <Grid Width="20" Height="20"
+                                      Visibility="{Binding IsOperationInProgress, Converter={StaticResource BoolToVis}}"
+                                      ToolTip="Working...">
+                                    <Ellipse Width="14" Height="14"
+                                             Stroke="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowTextKey}}"
+                                             StrokeThickness="2"
+                                             StrokeDashArray="3 1.5"
+                                             StrokeDashCap="Round"
+                                             Opacity="0.85"
+                                             RenderTransformOrigin="0.5,0.5"
+                                             SnapsToDevicePixels="False"
+                                             UseLayoutRounding="False">
+                                        <Ellipse.RenderTransform>
+                                            <RotateTransform x:Name="QuickActionSpinnerRotate" Angle="0" />
+                                        </Ellipse.RenderTransform>
+                                        <Ellipse.Triggers>
+                                            <EventTrigger RoutedEvent="FrameworkElement.Loaded">
+                                                <BeginStoryboard>
+                                                    <Storyboard RepeatBehavior="Forever">
+                                                        <DoubleAnimation
+                                                            Storyboard.TargetName="QuickActionSpinnerRotate"
+                                                            Storyboard.TargetProperty="Angle"
+                                                            From="0" To="360" Duration="0:0:1" />
+                                                    </Storyboard>
+                                                </BeginStoryboard>
+                                            </EventTrigger>
+                                        </Ellipse.Triggers>
+                                    </Ellipse>
+                                </Grid>
+
+                                <Button Command="{Binding DataContext.QuickInstallCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
                                         CommandParameter="{Binding}"
                                         ToolTip="Install latest version"
-                                        Visibility="{Binding CanQuickInstall, Converter={StaticResource BoolToVis}}"
                                         AutomationProperties.Name="{Binding InstallButtonAccessibleName}">
+                                    <Button.Style>
+                                        <Style TargetType="Button" BasedOn="{StaticResource IconButtonStyle}">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                            <Style.Triggers>
+                                                <MultiDataTrigger>
+                                                    <MultiDataTrigger.Conditions>
+                                                        <Condition Binding="{Binding CanQuickInstall}" Value="True" />
+                                                        <Condition Binding="{Binding IsOperationInProgress}" Value="False" />
+                                                    </MultiDataTrigger.Conditions>
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                </MultiDataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
                                     <imaging:CrispImage Width="16" Height="16"
                                                         Moniker="{x:Static catalog:KnownMonikers.CloudDownload}" />
                                 </Button>
-                                <Button Style="{StaticResource IconButtonStyle}"
-                                        Command="{Binding DataContext.QuickUpdateCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                <Button Command="{Binding DataContext.QuickUpdateCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
                                         CommandParameter="{Binding}"
                                         ToolTip="Update to latest version"
-                                        Visibility="{Binding HasUpdate, Converter={StaticResource BoolToVis}}"
                                         AutomationProperties.Name="{Binding UpdateButtonAccessibleName}">
+                                    <Button.Style>
+                                        <Style TargetType="Button" BasedOn="{StaticResource IconButtonStyle}">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                            <Style.Triggers>
+                                                <MultiDataTrigger>
+                                                    <MultiDataTrigger.Conditions>
+                                                        <Condition Binding="{Binding HasUpdate}" Value="True" />
+                                                        <Condition Binding="{Binding IsOperationInProgress}" Value="False" />
+                                                    </MultiDataTrigger.Conditions>
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                </MultiDataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
                                     <imaging:CrispImage Width="16" Height="16"
                                                         Moniker="{x:Static catalog:KnownMonikers.StatusUpdateAvailable}" />
                                 </Button>
-                                <Button Style="{StaticResource IconButtonStyle}"
-                                        Command="{Binding DataContext.QuickUninstallCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                <Button Command="{Binding DataContext.QuickUninstallCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
                                         CommandParameter="{Binding}"
                                         ToolTip="Uninstall package"
-                                        Visibility="{Binding CanQuickUninstall, Converter={StaticResource BoolToVis}}"
                                         AutomationProperties.Name="{Binding UninstallButtonAccessibleName}">
+                                    <Button.Style>
+                                        <Style TargetType="Button" BasedOn="{StaticResource IconButtonStyle}">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                            <Style.Triggers>
+                                                <MultiDataTrigger>
+                                                    <MultiDataTrigger.Conditions>
+                                                        <Condition Binding="{Binding CanQuickUninstall}" Value="True" />
+                                                        <Condition Binding="{Binding IsOperationInProgress}" Value="False" />
+                                                    </MultiDataTrigger.Conditions>
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                </MultiDataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
                                     <imaging:CrispImage Width="16" Height="16"
                                                         Moniker="{x:Static catalog:KnownMonikers.Remove}" />
                                 </Button>
