@@ -80,7 +80,7 @@
         </Strings>
       </Button>
 
-      <Button guid="NuGetManagerSlim" id="OpenForProjectCommand" priority="0x0100" type="Button">
+      <Button guid="NuGetManagerSlim" id="OpenForProjectCommand" priority="0x0200" type="Button">
         <Parent guid="VSMainMenu" id="ProjectNode.AddGroup" />
         <Icon guid="ImageCatalogGuid" id="NuGet" />
         <CommandFlag>IconIsMoniker</CommandFlag>

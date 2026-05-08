@@ -324,6 +324,19 @@
                      Visibility="{Binding HasPackages, Converter={StaticResource BoolToVis}}"
                      AutomationProperties.Name="Package list"
                      HorizontalContentAlignment="Stretch">
+                <ListBox.Style>
+                    <!-- While a project switch / filter reload is in flight,
+                         fade and disable the previous list so it's clear new
+                         data is being loaded without flashing the list empty. -->
+                    <Style TargetType="ListBox" BasedOn="{StaticResource {x:Type ListBox}}">
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsLoading}" Value="True">
+                                <Setter Property="Opacity" Value="0.45" />
+                                <Setter Property="IsHitTestVisible" Value="False" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </ListBox.Style>
                 <ListBox.ItemTemplate>
                     <DataTemplate DataType="{x:Type vm:PackageRowViewModel}">
                         <Grid Margin="4,3" Background="Transparent">

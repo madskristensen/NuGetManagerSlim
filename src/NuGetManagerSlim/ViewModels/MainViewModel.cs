@@ -46,6 +46,10 @@ namespace NuGetManagerSlim.ViewModels
 
         private CancellationTokenSource? _searchCts;
         private CancellationTokenSource? _operationCts;
+        // Cancels an in-flight ApplyFiltersAsync (project switch / view-mode
+        // change) so a fast switch between projects doesn't let a stale
+        // installed-list overwrite the newer one when it eventually completes.
+        private CancellationTokenSource? _filterCts;
         private System.Timers.Timer? _debounceTimer;
         private readonly List<string> _searchHistory = [];
         private int _searchHistoryIndex = -1;
@@ -511,6 +515,11 @@ namespace NuGetManagerSlim.ViewModels
 
                 _packages.ReplaceAll(rows.OrderBy(r => r.IsTransitive).ThenBy(r => r.PackageId));
 
+                // Don't kick off background follow-on work (metadata enrich,
+                // transitive parse) if the user already moved to another
+                // project - those would race against the next ApplyFilters.
+                cancellationToken.ThrowIfCancellationRequested();
+
                 if (!FilterUpdates)
                 {
                     EnrichInstalledMetadataInBackground(Packages.ToList());
@@ -893,10 +902,22 @@ namespace NuGetManagerSlim.ViewModels
             // Re-load packages using the current scope, view-mode and search.
             // Solution scope is read-only and never shows online search results -
             // it always shows the aggregated installed list.
-            if (FilterInstalled || FilterUpdates || IsReadOnlyScope)
-                await ApplyFiltersAsync();
-            else
-                await SearchRemoteAsync();
+            try
+            {
+                if (FilterInstalled || FilterUpdates || IsReadOnlyScope)
+                {
+                    var ct = ReplaceCts(ref _filterCts);
+                    await ApplyFiltersAsync(ct);
+                }
+                else
+                {
+                    await SearchRemoteAsync();
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // A newer reload superseded this one - drop quietly.
+            }
         }
 
         [RelayCommand]
@@ -1100,6 +1121,8 @@ namespace NuGetManagerSlim.ViewModels
             _searchCts?.Dispose();
             _operationCts?.Cancel();
             _operationCts?.Dispose();
+            _filterCts?.Cancel();
+            _filterCts?.Dispose();
             _enrichCts?.Cancel();
             _enrichCts?.Dispose();
             _transitiveCts?.Cancel();
