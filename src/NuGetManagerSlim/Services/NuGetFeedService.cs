@@ -553,17 +553,25 @@ namespace NuGetManagerSlim.Services
                 try
                 {
                     var repository = Repository.Factory.GetCoreV3(source.Source);
-                    var resource = await repository.GetResourceAsync<FindPackageByIdResource>(cancellationToken).ConfigureAwait(false);
+                    var resource = await repository.GetResourceAsync<PackageMetadataResource>(cancellationToken).ConfigureAwait(false);
                     if (resource == null) continue;
 
-                    var versions = await resource.GetAllVersionsAsync(packageId, _cacheContext, _logger, cancellationToken).ConfigureAwait(false);
+                    // Use PackageMetadataResource (which honors includeUnlisted: false)
+                    // instead of FindPackageByIdResource.GetAllVersionsAsync. The flat
+                    // container returns every version that was ever pushed, including
+                    // ones the author has unlisted on NuGet.org, so the dropdown ended
+                    // up showing versions that don't appear on the gallery.
+                    var metadata = await resource.GetMetadataAsync(
+                        packageId, includePrerelease: true, includeUnlisted: false,
+                        _cacheContext, _logger, cancellationToken).ConfigureAwait(false);
 
                     // A source that doesn't host this package returns an empty
                     // sequence rather than throwing; fall through to the next
                     // source instead of returning an empty list as the answer.
-                    if (versions == null) continue;
-                    var filtered = versions
-                        .Where(v => includePrerelease || !v.IsPrerelease)
+                    if (metadata == null) continue;
+                    var filtered = metadata
+                        .Select(m => m.Identity.Version)
+                        .Where(v => v != null && (includePrerelease || !v.IsPrerelease))
                         .OrderByDescending(v => v)
                         .ToList();
                     if (filtered.Count == 0) continue;
