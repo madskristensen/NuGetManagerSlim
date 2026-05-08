@@ -64,5 +64,14 @@ namespace NuGetManagerSlim.Services
         /// reaches the live feed.
         /// </summary>
         void InvalidateCache();
+
+        /// <summary>
+        /// Resolves and caches the per-source NuGet protocol resources
+        /// (PackageSearchResource / PackageMetadataResource) so the first user
+        /// search isn't paying for service-index download, resource lookup, TLS
+        /// handshake, and credential prompts on the critical path. Safe to call
+        /// multiple times; subsequent calls are no-ops once warm.
+        /// </summary>
+        Task PrewarmSourcesAsync(CancellationToken cancellationToken);
     }
 }

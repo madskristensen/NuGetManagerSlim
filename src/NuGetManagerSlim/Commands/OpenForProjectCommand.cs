@@ -12,8 +12,20 @@ namespace NuGetManagerSlim.Commands
     {
         // Visibility is controlled declaratively via <VisibilityConstraints> in
         // VSCommandTable.vsct combined with a ProvideUIContextRule attribute on
-        // NuGetManagerSlimPackage that activates when the selected project has
-        // the .NET project capability. No BeforeQueryStatus override is needed.
+        // NuGetManagerSlimPackage that activates when the right-clicked
+        // hierarchy item is a .csproj / .vbproj / .fsproj. No BeforeQueryStatus
+        // override is needed.
+
+        protected override Task InitializeCompletedAsync()
+        {
+            // Tell the shell this command does NOT manage its own visibility,
+            // so the <VisibilityConstraints> UIContext rule keeps governing
+            // visibility even after the package is loaded. Without this, the
+            // Toolkit's OleMenuCommand wrapper would default Supported = true
+            // and the command could appear in contexts the rule excludes.
+            Command.Supported = false;
+            return Task.CompletedTask;
+        }
 
         protected override async Task ExecuteAsync(OleMenuCmdEventArgs e)
         {

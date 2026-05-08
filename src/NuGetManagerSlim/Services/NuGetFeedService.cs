@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -197,7 +198,133 @@ namespace NuGetManagerSlim.Services
             lock (_metadataCacheLock) _metadataCache.Clear();
             lock (_versionsCacheLock) _versionsCache.Clear();
             lock (_sourcesCacheLock) _enabledSourcesCache = null;
+            _repositoryCache.Clear();
+            _searchResourceCache.Clear();
+            _metadataResourceCache.Clear();
+            _searchDiskCache.Clear();
             System.Threading.Interlocked.Exchange(ref _bypassNextNetworkFetch, 1);
+            DiagnosticsLogger.Info("Caches cleared by user-initiated refresh.");
+        }
+
+        // Per-source repository + resource caches. NuGet's Repository.Factory
+        // returns a fresh SourceRepository on every call; each call also
+        // re-runs GetResourceAsync, which re-downloads the v3 service index
+        // when it isn't already warm in this process. Cache them ourselves so
+        // PrewarmSourcesAsync actually pays off on the first user search.
+        private readonly ConcurrentDictionary<string, SourceRepository> _repositoryCache = new(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<string, Task<PackageSearchResource>> _searchResourceCache = new(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<string, Task<PackageMetadataResource>> _metadataResourceCache = new(StringComparer.OrdinalIgnoreCase);
+
+        // Disk-backed second tier for the search-result cache. Lets the first
+        // search of a fresh VS session be served from disk when the same query
+        // was issued recently. Stored as a small DTO so NuGetVersion roundtrips
+        // cleanly (System.Text.Json doesn't know how to read NuGetVersion).
+        private readonly FeedMetadataDiskCache<List<SearchCacheDto>> _searchDiskCache =
+            new("search", TimeSpan.FromHours(1), 50L * 1024 * 1024);
+
+        private sealed class SearchCacheDto
+        {
+            public string PackageId { get; set; } = string.Empty;
+            public string? LatestStable { get; set; }
+            public string? LatestPre { get; set; }
+            public string? Description { get; set; }
+            public string? Authors { get; set; }
+            public long DownloadCount { get; set; }
+            public string? SourceName { get; set; }
+            public string? IconUrl { get; set; }
+        }
+
+        private static SearchCacheDto ToDto(PackageModel m) => new()
+        {
+            PackageId = m.PackageId,
+            LatestStable = m.LatestStableVersion?.ToNormalizedString(),
+            LatestPre = m.LatestPrereleaseVersion?.ToNormalizedString(),
+            Description = m.Description,
+            Authors = m.Authors,
+            DownloadCount = m.DownloadCount,
+            SourceName = m.SourceName,
+            IconUrl = m.IconUrl,
+        };
+
+        private static PackageModel FromDto(SearchCacheDto d)
+        {
+            NuGetVersion? stable = null, pre = null;
+            if (!string.IsNullOrEmpty(d.LatestStable)) NuGetVersion.TryParse(d.LatestStable, out stable);
+            if (!string.IsNullOrEmpty(d.LatestPre)) NuGetVersion.TryParse(d.LatestPre, out pre);
+            return new PackageModel
+            {
+                PackageId = d.PackageId,
+                LatestStableVersion = stable,
+                LatestPrereleaseVersion = pre,
+                Description = d.Description,
+                Authors = d.Authors,
+                DownloadCount = d.DownloadCount,
+                SourceName = d.SourceName,
+                IconUrl = d.IconUrl,
+            };
+        }
+
+        private SourceRepository GetRepository(PackageSourceModel source)
+        {
+            return _repositoryCache.GetOrAdd(source.Source, _ => Repository.Factory.GetCoreV3(source.Source));
+        }
+
+        private Task<PackageSearchResource> GetSearchResourceAsync(PackageSourceModel source, CancellationToken cancellationToken)
+        {
+            // Cache the Task<>, not the resource: GetResourceAsync may be in
+            // flight when the second caller arrives, and we want both to await
+            // the same outstanding request rather than fire two parallel ones.
+            // The cancellation token here only affects the *first* caller; that
+            // is fine because pre-warm uses its own short token.
+            // VSTHRD003: the cached Task is intentionally shared across sync
+            // contexts; callers don't deadlock because the underlying work is
+            // pure HTTP / async and never re-enters the UI thread.
+#pragma warning disable VSTHRD003
+            return _searchResourceCache.GetOrAdd(source.Source, _ =>
+                GetRepository(source).GetResourceAsync<PackageSearchResource>(cancellationToken));
+#pragma warning restore VSTHRD003
+        }
+
+        private Task<PackageMetadataResource> GetMetadataResourceAsync(PackageSourceModel source, CancellationToken cancellationToken)
+        {
+#pragma warning disable VSTHRD003
+            return _metadataResourceCache.GetOrAdd(source.Source, _ =>
+                GetRepository(source).GetResourceAsync<PackageMetadataResource>(cancellationToken));
+#pragma warning restore VSTHRD003
+        }
+
+        public async Task PrewarmSourcesAsync(CancellationToken cancellationToken)
+        {
+            using var _ = DiagnosticsLogger.Time("PrewarmSourcesAsync");
+            var sources = GetEnabledSources();
+            if (sources.Count == 0) return;
+
+            // Hard cap so a dead private feed can't keep the prewarm task alive
+            // for the full HttpClient timeout (usually 100s). The next real call
+            // surfaces the failure normally.
+            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
+
+            var tasks = new List<Task>(sources.Count * 2);
+            foreach (var src in sources)
+            {
+                tasks.Add(SafeWarmAsync(GetSearchResourceAsync(src, linked.Token)));
+                tasks.Add(SafeWarmAsync(GetMetadataResourceAsync(src, linked.Token)));
+            }
+
+            await Task.WhenAll(tasks).ConfigureAwait(false);
+        }
+
+        private static async Task SafeWarmAsync<TResource>(Task<TResource> task)
+        {
+            // Pre-warm intentionally awaits a task started outside the caller's
+            // sync context (a cached task shared across all callers). The work
+            // is pure HTTP and never re-enters the UI thread, so deadlock risk
+            // is nil.
+#pragma warning disable VSTHRD003
+            try { await task.ConfigureAwait(false); }
+#pragma warning restore VSTHRD003
+            catch (Exception ex) { DiagnosticsLogger.Warn("Source pre-warm failed: " + ex.Message); }
         }
 
         public async Task<IReadOnlyList<PackageModel>> SearchAsync(
@@ -211,7 +338,25 @@ namespace NuGetManagerSlim.Services
             var bypass = System.Threading.Interlocked.Exchange(ref _bypassNextNetworkFetch, 0) == 1;
             var cacheKey = BuildSearchCacheKey(query, includePrerelease, skip, take, sourceNameFilter);
             if (!bypass && TryGetCachedSearch(cacheKey, out var cached))
+            {
+                DiagnosticsLogger.Verbose($"search mem-hit '{query}'");
                 return cached;
+            }
+
+            // Disk-tier hit: serve immediately and promote into the in-memory
+            // cache so subsequent keystrokes also fast-path. Don't fan out to
+            // the network on a hit - the next user-initiated Refresh will.
+            if (!bypass)
+            {
+                var disk = await _searchDiskCache.ReadAsync(cacheKey, cancellationToken).ConfigureAwait(false);
+                if (disk != null)
+                {
+                    DiagnosticsLogger.Verbose($"search disk-hit '{query}'");
+                    var hydrated = disk.Select(FromDto).ToList();
+                    StoreCachedSearch(cacheKey, hydrated);
+                    return hydrated;
+                }
+            }
 
             var results = new List<PackageModel>();
             var sources = GetEnabledSources();
@@ -252,7 +397,19 @@ namespace NuGetManagerSlim.Services
                 .GroupBy(p => p.PackageId, StringComparer.OrdinalIgnoreCase)
                 .Select(g => g.First())
                 .ToList();
+
+            // Cancellation guard: a query that was cancelled mid-flight returns
+            // a partial / empty result set. Caching that would poison the next
+            // identical search until TTL expires. Drop the write entirely - the
+            // next typed keystroke (or Refresh) will fill the cache cleanly.
+            if (cancellationToken.IsCancellationRequested)
+            {
+                DiagnosticsLogger.Verbose($"search '{query}' cancelled; cache write skipped");
+                return deduped;
+            }
+
             StoreCachedSearch(cacheKey, deduped);
+            _ = _searchDiskCache.WriteAsync(cacheKey, deduped.Select(ToDto).ToList(), CancellationToken.None);
 
             // Backfill: when a slow source eventually returns, merge its
             // results with the partial set already cached and rewrite the
@@ -287,7 +444,10 @@ namespace NuGetManagerSlim.Services
                         }
                     }
                     if (addedLate)
+                    {
                         StoreCachedSearch(cacheKey, merged);
+                        _ = _searchDiskCache.WriteAsync(cacheKey, merged.Select(ToDto).ToList(), CancellationToken.None);
+                    }
                 }
                 finally
                 {
@@ -308,8 +468,7 @@ namespace NuGetManagerSlim.Services
         {
             try
             {
-                var repository = Repository.Factory.GetCoreV3(source.Source);
-                var resource = await repository.GetResourceAsync<PackageSearchResource>(cancellationToken).ConfigureAwait(false);
+                var resource = await GetSearchResourceAsync(source, cancellationToken).ConfigureAwait(false);
                 if (resource == null) return null;
 
                 var searchFilter = new SearchFilter(includePrerelease: includePrerelease);
@@ -373,7 +532,8 @@ namespace NuGetManagerSlim.Services
             }
 
             var result = await GetPackageMetadataCoreAsync(packageId ?? string.Empty, cancellationToken).ConfigureAwait(false);
-            StoreMetadata(key, result);
+            if (!cancellationToken.IsCancellationRequested)
+                StoreMetadata(key, result);
             return result;
         }
 
@@ -439,8 +599,7 @@ namespace NuGetManagerSlim.Services
         {
             try
             {
-                var repository = Repository.Factory.GetCoreV3(source.Source);
-                var resource = await repository.GetResourceAsync<PackageMetadataResource>(cancellationToken).ConfigureAwait(false);
+                var resource = await GetMetadataResourceAsync(source, cancellationToken).ConfigureAwait(false);
                 if (resource == null) return null;
 
                 var metadata = await resource.GetMetadataAsync(
@@ -469,7 +628,7 @@ namespace NuGetManagerSlim.Services
                 {
                     try
                     {
-                        var searchResource = await repository.GetResourceAsync<PackageSearchResource>(cancellationToken).ConfigureAwait(false);
+                        var searchResource = await GetSearchResourceAsync(source, cancellationToken).ConfigureAwait(false);
                         if (searchResource != null)
                         {
                             var hits = await searchResource.SearchAsync(
@@ -531,7 +690,8 @@ namespace NuGetManagerSlim.Services
             }
 
             var result = await GetPackageMetadataCoreAsync(packageId ?? string.Empty, version!, cancellationToken).ConfigureAwait(false);
-            StoreMetadata(key, result);
+            if (!cancellationToken.IsCancellationRequested)
+                StoreMetadata(key, result);
             return result;
         }
 
@@ -579,8 +739,7 @@ namespace NuGetManagerSlim.Services
         {
             try
             {
-                var repository = Repository.Factory.GetCoreV3(source.Source);
-                var resource = await repository.GetResourceAsync<PackageMetadataResource>(cancellationToken).ConfigureAwait(false);
+                var resource = await GetMetadataResourceAsync(source, cancellationToken).ConfigureAwait(false);
                 if (resource == null) return null;
 
                 // Pull the full registration index for the package once and pick
@@ -614,7 +773,7 @@ namespace NuGetManagerSlim.Services
                 {
                     try
                     {
-                        var searchResource = await repository.GetResourceAsync<PackageSearchResource>(cancellationToken).ConfigureAwait(false);
+                        var searchResource = await GetSearchResourceAsync(source, cancellationToken).ConfigureAwait(false);
                         if (searchResource != null)
                         {
                             var hits = await searchResource.SearchAsync(
@@ -665,7 +824,8 @@ namespace NuGetManagerSlim.Services
             }
 
             var fresh = await GetVersionsCoreAsync(packageId, includePrerelease, cancellationToken).ConfigureAwait(false);
-            StoreVersions(key, fresh);
+            if (!cancellationToken.IsCancellationRequested)
+                StoreVersions(key, fresh);
             return fresh;
         }
 
@@ -678,8 +838,7 @@ namespace NuGetManagerSlim.Services
             {
                 try
                 {
-                    var repository = Repository.Factory.GetCoreV3(source.Source);
-                    var resource = await repository.GetResourceAsync<PackageMetadataResource>(cancellationToken).ConfigureAwait(false);
+                    var resource = await GetMetadataResourceAsync(source, cancellationToken).ConfigureAwait(false);
                     if (resource == null) continue;
 
                     // Use PackageMetadataResource (which honors includeUnlisted: false)

@@ -264,7 +264,14 @@ namespace NuGetManagerSlim.ViewModels
                     ? _mruService.GetRecentAsync(cancellationToken)
                     : Task.FromResult<IReadOnlyList<PackageModel>>(Array.Empty<PackageModel>());
 
-                await Task.WhenAll(emptySearch, mru).ConfigureAwait(false);
+                // Resolve and cache per-source NuGet protocol resources so the
+                // first user search isn't paying for service-index download,
+                // resource lookup, TLS handshake, and credential prompts on
+                // the critical path. Runs in parallel with the empty search
+                // and MRU prime so total wall time stays the same.
+                var sourceWarm = _feedService.PrewarmSourcesAsync(cancellationToken);
+
+                await Task.WhenAll(emptySearch, mru, sourceWarm).ConfigureAwait(false);
             }
             catch (OperationCanceledException) { }
             catch (Exception ex) { await ex.LogAsync(); }
