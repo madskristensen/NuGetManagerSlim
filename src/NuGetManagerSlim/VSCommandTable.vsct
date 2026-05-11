@@ -37,6 +37,9 @@
       <Group guid="NuGetManagerSlim" id="ProjectContextGroup" priority="0x0600">
         <Parent guid="guidSHLMainMenu" id="IDM_VS_CTXT_PROJNODE" />
       </Group>
+      <Group guid="NuGetManagerSlim" id="SolutionContextGroup" priority="0x0600">
+        <Parent guid="guidSHLMainMenu" id="IDM_VS_CTXT_SOLNNODE" />
+      </Group>
     </Groups>
 
     <Buttons>
@@ -91,6 +94,16 @@
           <ToolTipText>Open the NuGet Quick Manager scoped to this project</ToolTipText>
         </Strings>
       </Button>
+
+      <Button guid="NuGetManagerSlim" id="OpenForSolutionCommand" priority="0xFFF" type="Button">
+        <Parent guid="VSMainMenu" id="SolutionNode.BuildGroup" />
+        <Icon guid="ImageCatalogGuid" id="NuGet" />
+        <CommandFlag>IconIsMoniker</CommandFlag>
+        <Strings>
+          <ButtonText>Manage NuGet Packages for Solution (Slim)...</ButtonText>
+          <ToolTipText>Open the NuGet Quick Manager scoped to every project in the solution</ToolTipText>
+        </Strings>
+      </Button>
     </Buttons>
 
   </Commands>
@@ -119,6 +132,8 @@
       <IDSymbol name="OpenForProjectCommand"                value="0x0204" />
 
       <IDSymbol name="ProjectContextGroup"                  value="0x1200" />
+      <IDSymbol name="SolutionContextGroup"                 value="0x1201" />
+      <IDSymbol name="OpenForSolutionCommand"               value="0x0205" />
     </GuidSymbol>
 
     <!--

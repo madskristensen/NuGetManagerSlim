@@ -40,6 +40,8 @@ namespace NuGetManagerSlim
         public const int RefreshCommand = 0x0203;
         public const int OpenForProjectCommand = 0x0204;
         public const int ProjectContextGroup = 0x1200;
+        public const int SolutionContextGroup = 0x1201;
+        public const int OpenForSolutionCommand = 0x0205;
         public const int StatusUpdateAvailable = 0x0F82;
     }
 }

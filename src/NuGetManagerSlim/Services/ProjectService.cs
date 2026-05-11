@@ -56,16 +56,30 @@ namespace NuGetManagerSlim.Services
                             cancellationToken.ThrowIfCancellationRequested();
                             MergeInstalled(byId, pkg);
                         }
-                        continue;
+                    }
+                    else
+                    {
+                        // The project file is parsed with synchronous XDocument.Load, which
+                        // would otherwise stall the UI thread on every filter toggle / project
+                        // switch. Hop to the threadpool so the I/O + parse runs off
+                        // the dispatcher.
+                        await TaskScheduler.Default;
+
+                        foreach (var pkg in ReadInstalledFromProject(projectPath))
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+                            MergeInstalled(byId, pkg);
+                        }
                     }
 
-                    // The project file is parsed with synchronous XDocument.Load, which
-                    // would otherwise stall the UI thread on every filter toggle / project
-                    // switch. Hop to the threadpool so the I/O + parse runs off
-                    // the dispatcher.
+                    // Imported PackageReferences from Directory.Build.props /
+                    // Directory.Build.targets are invisible to both the
+                    // IVsPackageInstallerServices view (CPM-injected) and the
+                    // raw .csproj XML, so always layer them on top regardless
+                    // of which branch above produced the project's own list.
                     await TaskScheduler.Default;
-
-                    foreach (var pkg in ReadInstalledFromProject(projectPath))
+                    var imported = MsBuildImportedPackageReader.ReadImportedPackages(projectPath, cancellationToken);
+                    foreach (var pkg in imported)
                     {
                         cancellationToken.ThrowIfCancellationRequested();
                         MergeInstalled(byId, pkg);
@@ -143,6 +157,32 @@ namespace NuGetManagerSlim.Services
             }
 
             return result;
+        }
+
+        // Disk-only read: combines the project's own PackageReference /
+        // packages.config entries with any PackageReferences declared in
+        // Directory.Build.props / Directory.Build.targets /
+        // Directory.Packages.props above the project. Unit-test friendly:
+        // does not touch VS services, so tests can exercise the merge logic
+        // without spinning up a shell host.
+        public static IReadOnlyList<PackageModel> ReadInstalledFromProjectWithImports(
+            string projectFullPath,
+            CancellationToken cancellationToken)
+        {
+            var byId = new Dictionary<string, PackageModel>(StringComparer.OrdinalIgnoreCase);
+            foreach (var pkg in ReadInstalledFromProject(projectFullPath))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                MergeInstalled(byId, pkg);
+            }
+            foreach (var pkg in MsBuildImportedPackageReader.ReadImportedPackages(projectFullPath, cancellationToken))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                MergeInstalled(byId, pkg);
+            }
+            return byId.Values
+                .OrderBy(p => p.PackageId, StringComparer.OrdinalIgnoreCase)
+                .ToList();
         }
 
         // Reads installed packages from a project file by inspecting <PackageReference>
@@ -262,9 +302,61 @@ namespace NuGetManagerSlim.Services
 
         private static IReadOnlyList<string> ResolveScopePaths(ProjectScopeModel scope)
         {
+            if (scope.IsSolutionScope)
+            {
+                if (scope.ProjectFullPaths == null || scope.ProjectFullPaths.Count == 0)
+                    return Array.Empty<string>();
+
+                var list = new List<string>(scope.ProjectFullPaths.Count);
+                foreach (var path in scope.ProjectFullPaths)
+                {
+                    if (IsManagedDotNetProject(path)) list.Add(path);
+                }
+                return list;
+            }
+
             if (string.IsNullOrEmpty(scope.ProjectFullPath)) return Array.Empty<string>();
             if (!IsManagedDotNetProject(scope.ProjectFullPath)) return Array.Empty<string>();
             return new[] { scope.ProjectFullPath };
+        }
+
+        public async Task<IReadOnlyDictionary<string, NuGetVersion?>> GetInstalledVersionsPerProjectAsync(
+            ProjectScopeModel scope,
+            string packageId,
+            CancellationToken cancellationToken)
+        {
+            var result = new Dictionary<string, NuGetVersion?>(StringComparer.OrdinalIgnoreCase);
+            if (scope == null || string.IsNullOrEmpty(packageId)) return result;
+
+            var projectPaths = ResolveScopePaths(scope);
+            if (projectPaths.Count == 0) return result;
+
+            foreach (var projectPath in projectPaths)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var subScope = new ProjectScopeModel
+                {
+                    ProjectFullPath = projectPath,
+                    ProjectFullPaths = new[] { projectPath },
+                    ScopeKind = ProjectScopeKind.Project,
+                    DisplayName = Path.GetFileNameWithoutExtension(projectPath),
+                };
+
+                var installed = await GetInstalledPackagesAsync(subScope, cancellationToken).ConfigureAwait(false);
+                NuGetVersion? version = null;
+                foreach (var pkg in installed)
+                {
+                    if (string.Equals(pkg.PackageId, packageId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        version = pkg.InstalledVersion;
+                        break;
+                    }
+                }
+                result[projectPath] = version;
+            }
+
+            return result;
         }
 
         // Dedupe by package id within a single project (e.g. the same id

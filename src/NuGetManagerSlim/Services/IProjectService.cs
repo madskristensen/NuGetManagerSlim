@@ -16,6 +16,15 @@ namespace NuGetManagerSlim.Services
             ProjectScopeModel scope,
             CancellationToken cancellationToken);
 
+        // Returns the installed version of `packageId` in each of the
+        // projects covered by `scope`. Projects without the package are
+        // included with a null version so the caller can render an
+        // "(not installed)" row in a per-project picker.
+        Task<IReadOnlyDictionary<string, NuGetVersion?>> GetInstalledVersionsPerProjectAsync(
+            ProjectScopeModel scope,
+            string packageId,
+            CancellationToken cancellationToken);
+
         Task InstallPackageAsync(
             string projectPath,
             string packageId,

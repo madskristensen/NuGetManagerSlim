@@ -44,6 +44,24 @@ namespace NuGetManagerSlim.ToolWindows
             // are already in cache, so the first render is skeleton-free.
             await viewModel.PrewarmAsync(cancellationToken);
 
+            // Default to solution scope on first open if a solution is loaded
+            // but the user hasn't selected a specific project. This is the
+            // entry path users hit when launching the tool window from a
+            // command bar or the Tools menu - without this they'd see an
+            // empty "no project context" state even though the solution is
+            // perfectly browsable in aggregate.
+            try
+            {
+                if (viewModel.CurrentProject == null)
+                {
+                    await viewModel.SetSolutionScopeAsync(cancellationToken);
+                }
+            }
+            catch (Exception ex)
+            {
+                await ex.LogAsync();
+            }
+
             var session = (viewModel, feedService, restoreMonitor);
             if (Pane.Instance != null)
             {
@@ -77,6 +95,7 @@ namespace NuGetManagerSlim.ToolWindows
             private RestoreMonitorService? _restoreMonitor;
             private PropertyChangedEventHandler? _viewModelPropertyChanged;
             private Action? _solutionClosedHandler;
+            private Action? _solutionLoadedHandler;
             private EventHandler<SelectionChangedEventArgs>? _selectionChangedHandler;
 
             public Pane()
@@ -131,6 +150,29 @@ namespace NuGetManagerSlim.ToolWindows
                 };
                 VS.Events.SolutionEvents.OnAfterCloseSolution += _solutionClosedHandler;
 
+                // When a solution finishes loading while the tool window is
+                // already open, default to Solution scope so users see the
+                // solution-level package set without having to click anything.
+                // Hooks the background-load-complete event so we don't query
+                // GetAllProjectsAsync before VS has finished registering
+                // every project hierarchy.
+                _solutionLoadedHandler = () =>
+                {
+                    ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+                    {
+                        try
+                        {
+                            if (viewModel.CurrentProject != null) return;
+                            await viewModel.SetSolutionScopeAsync();
+                        }
+                        catch (Exception ex)
+                        {
+                            await ex.LogAsync();
+                        }
+                    }).FileAndForget("vs/nugetmanagerslim/toolwindow/solutionloaded");
+                };
+                VS.Events.SolutionEvents.OnAfterBackgroundSolutionLoadComplete += _solutionLoadedHandler;
+
                 _selectionChangedHandler = (s, e) =>
                 {
 #pragma warning disable VSSDK007
@@ -139,10 +181,28 @@ namespace NuGetManagerSlim.ToolWindows
                         try
                         {
                             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-                            var project = await VS.Solutions.GetActiveProjectAsync();
+
+                            // Follow the Solution Explorer selection: solution
+                            // node -> Solution scope, project node -> Project
+                            // scope. Other selections (files, folders inside a
+                            // project, references nodes, etc.) leave the
+                            // current scope untouched so quickly clicking
+                            // around inside a project doesn't churn the list.
+                            var item = await VS.Solutions.GetActiveItemAsync();
+
+                            if (item is Community.VisualStudio.Toolkit.Solution)
+                            {
+                                if (viewModel.CurrentProject?.IsSolutionScope == true) return;
+                                await viewModel.SetSolutionScopeAsync();
+                                return;
+                            }
+
+                            var project = item as Community.VisualStudio.Toolkit.Project
+                                          ?? await VS.Solutions.GetActiveProjectAsync();
                             if (project != null && !string.IsNullOrEmpty(project.FullPath) && IsManagedDotNetProject(project.FullPath))
                             {
-                                if (string.Equals(viewModel.CurrentProject?.ProjectFullPath, project.FullPath, StringComparison.OrdinalIgnoreCase))
+                                if (viewModel.CurrentProject?.IsSolutionScope != true
+                                    && string.Equals(viewModel.CurrentProject?.ProjectFullPath, project.FullPath, StringComparison.OrdinalIgnoreCase))
                                     return;
 
                                 var displayName = project.Name;
@@ -172,6 +232,8 @@ namespace NuGetManagerSlim.ToolWindows
                             _viewModel.PropertyChanged -= _viewModelPropertyChanged;
                         if (_solutionClosedHandler != null)
                             VS.Events.SolutionEvents.OnAfterCloseSolution -= _solutionClosedHandler;
+                        if (_solutionLoadedHandler != null)
+                            VS.Events.SolutionEvents.OnAfterBackgroundSolutionLoadComplete -= _solutionLoadedHandler;
                         if (_selectionChangedHandler != null)
                             VS.Events.SelectionEvents.SelectionChanged -= _selectionChangedHandler;
 
@@ -192,6 +254,7 @@ namespace NuGetManagerSlim.ToolWindows
 
                         _viewModelPropertyChanged = null;
                         _solutionClosedHandler = null;
+                        _solutionLoadedHandler = null;
                         _selectionChangedHandler = null;
                         _viewModel = null;
                         _feedService = null;

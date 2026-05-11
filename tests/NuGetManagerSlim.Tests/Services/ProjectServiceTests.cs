@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using NuGetManagerSlim.Services;
 using Xunit;
 
@@ -99,6 +100,64 @@ namespace NuGetManagerSlim.Tests.Services
             var packages = ProjectService.ReadInstalledFromProject(path).ToList();
 
             Assert.Empty(packages);
+        }
+
+        [Fact]
+        public void ReadInstalledFromProjectWithImports_MergesProjectAndDirectoryBuildProps()
+        {
+            var projDir = Path.Combine(_tempDir, "App");
+            Directory.CreateDirectory(projDir);
+            var proj = Path.Combine(projDir, "App.csproj");
+
+            File.WriteAllText(proj, """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <ItemGroup>
+                    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+                  </ItemGroup>
+                </Project>
+                """);
+            File.WriteAllText(Path.Combine(_tempDir, "Directory.Build.props"), """
+                <Project>
+                  <ItemGroup>
+                    <PackageReference Include="StyleCop.Analyzers" Version="1.2.0-beta.556" />
+                  </ItemGroup>
+                </Project>
+                """);
+
+            var packages = ProjectService.ReadInstalledFromProjectWithImports(proj, CancellationToken.None);
+
+            Assert.Contains(packages, p => p.PackageId == "Newtonsoft.Json" && p.InstalledVersion?.ToString() == "13.0.3");
+            Assert.Contains(packages, p => p.PackageId == "StyleCop.Analyzers" && p.InstalledVersion?.ToString() == "1.2.0-beta.556");
+        }
+
+        [Fact]
+        public void ReadInstalledFromProjectWithImports_ProjectVersionWinsOverImportVersion()
+        {
+            var projDir = Path.Combine(_tempDir, "App");
+            Directory.CreateDirectory(projDir);
+            var proj = Path.Combine(projDir, "App.csproj");
+
+            File.WriteAllText(proj, """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <ItemGroup>
+                    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+                  </ItemGroup>
+                </Project>
+                """);
+            File.WriteAllText(Path.Combine(_tempDir, "Directory.Build.props"), """
+                <Project>
+                  <ItemGroup>
+                    <PackageReference Include="Newtonsoft.Json" Version="12.0.3" />
+                  </ItemGroup>
+                </Project>
+                """);
+
+            var packages = ProjectService.ReadInstalledFromProjectWithImports(proj, CancellationToken.None);
+
+            var nj = Assert.Single(packages, p => p.PackageId == "Newtonsoft.Json");
+            // MergeInstalled keeps the higher version, so 13.0.3 from the
+            // project file wins over 12.0.3 from the import.
+            Assert.Equal("13.0.3", nj.InstalledVersion?.ToString());
         }
     }
 }

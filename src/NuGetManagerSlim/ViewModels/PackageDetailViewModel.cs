@@ -19,6 +19,12 @@ namespace NuGetManagerSlim.ViewModels
         private readonly Action<string> _reportStatus;
         private readonly Func<Task>? _onChanged;
         private string? _projectFullPath;
+        private bool _isSolutionScope;
+        // Invoked instead of the single-project install / update / uninstall
+        // paths when the detail pane is showing a package under solution
+        // scope. The MainViewModel wires this to its fan-out dispatcher so
+        // the per-project picker dialog runs from here too.
+        private Func<SolutionPackageAction, NuGetVersion?, Task>? _solutionAction;
 
         [ObservableProperty] private string _packageId = string.Empty;
         [ObservableProperty] private string _description = string.Empty;
@@ -53,18 +59,21 @@ namespace NuGetManagerSlim.ViewModels
             INuGetFeedService feedService,
             IProjectService projectService,
             Action<string> reportStatus,
-            Func<Task>? onChanged = null)
+            Func<Task>? onChanged = null,
+            Func<SolutionPackageAction, NuGetVersion?, Task>? solutionAction = null)
         {
             _feedService = feedService;
             _projectService = projectService;
             _reportStatus = reportStatus;
             _onChanged = onChanged;
+            _solutionAction = solutionAction;
         }
 
         public async Task LoadAsync(PackageRowViewModel row, ProjectScopeModel scope, bool includePrerelease, CancellationToken cancellationToken)
         {
             PackageId = row.PackageId;
-            _projectFullPath = scope?.ProjectFullPath;
+            _isSolutionScope = scope?.IsSolutionScope ?? false;
+            _projectFullPath = _isSolutionScope ? null : scope?.ProjectFullPath;
             _availableVersions.ReplaceAll(System.Array.Empty<VersionListItem>());
             _dependencies.ReplaceAll(System.Array.Empty<PackageDependencyInfo>());
             _dependencyGroups.ReplaceAll(System.Array.Empty<DependencyGroupViewModel>());
@@ -96,7 +105,7 @@ namespace NuGetManagerSlim.ViewModels
 
             // Install / update / uninstall require a single target project,
             // so disable them when no project is selected.
-            var hasProjectTarget = !string.IsNullOrEmpty(_projectFullPath);
+            var hasProjectTarget = !string.IsNullOrEmpty(_projectFullPath) || (_isSolutionScope && _solutionAction != null);
             CanInstall = hasProjectTarget && !row.IsInstalled;
             CanUpdate = hasProjectTarget && row.HasUpdate;
             CanUninstall = hasProjectTarget && row.IsInstalled && !row.IsTransitive;
@@ -175,7 +184,14 @@ namespace NuGetManagerSlim.ViewModels
         [RelayCommand]
         private async Task InstallAsync(CancellationToken cancellationToken)
         {
-            if (SelectedVersion == null || string.IsNullOrEmpty(_projectFullPath)) return;
+            if (SelectedVersion == null) return;
+            if (_isSolutionScope && _solutionAction != null)
+            {
+                await _solutionAction(SolutionPackageAction.Install, SelectedVersion);
+                if (_onChanged != null) await _onChanged();
+                return;
+            }
+            if (string.IsNullOrEmpty(_projectFullPath)) return;
             try
             {
                 _reportStatus($"Installing {PackageId} {SelectedVersion}\u2026");
@@ -193,7 +209,14 @@ namespace NuGetManagerSlim.ViewModels
         [RelayCommand]
         private async Task UpdateAsync(CancellationToken cancellationToken)
         {
-            if (SelectedVersion == null || string.IsNullOrEmpty(_projectFullPath)) return;
+            if (SelectedVersion == null) return;
+            if (_isSolutionScope && _solutionAction != null)
+            {
+                await _solutionAction(SolutionPackageAction.Update, SelectedVersion);
+                if (_onChanged != null) await _onChanged();
+                return;
+            }
+            if (string.IsNullOrEmpty(_projectFullPath)) return;
             try
             {
                 _reportStatus($"Updating {PackageId} to {SelectedVersion}\u2026");
@@ -211,6 +234,12 @@ namespace NuGetManagerSlim.ViewModels
         [RelayCommand]
         private async Task UninstallAsync(CancellationToken cancellationToken)
         {
+            if (_isSolutionScope && _solutionAction != null)
+            {
+                await _solutionAction(SolutionPackageAction.Uninstall, null);
+                if (_onChanged != null) await _onChanged();
+                return;
+            }
             if (string.IsNullOrEmpty(_projectFullPath)) return;
             try
             {

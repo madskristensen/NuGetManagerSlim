@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Community.VisualStudio.Toolkit;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Threading;
 using NuGet.Versioning;
 using NuGetManagerSlim.Models;
@@ -284,8 +285,65 @@ namespace NuGetManagerSlim.ViewModels
             {
                 DisplayName = projectDisplayName,
                 ProjectFullPath = projectFullPath,
+                ProjectFullPaths = new[] { projectFullPath },
+                ScopeKind = ProjectScopeKind.Project,
             };
             await ReloadPackagesAsync();
+        }
+
+        // Switches the tool window to solution scope: every loaded managed
+        // project in the open solution is queried in aggregate. Install /
+        // update / uninstall actions in this mode fan out via a per-project
+        // picker dialog instead of targeting a single project.
+        public async Task SetSolutionScopeAsync(CancellationToken cancellationToken = default)
+        {
+            var (displayName, projectPaths) = await EnumerateSolutionProjectsAsync();
+            if (projectPaths.Count == 0)
+            {
+                // No solution / no managed projects loaded - drop back to the
+                // unset state so the empty-state copy explains the situation.
+                ClearCurrentProject();
+                return;
+            }
+
+            CurrentProject = new ProjectScopeModel
+            {
+                DisplayName = displayName,
+                ProjectFullPath = string.Empty,
+                ProjectFullPaths = projectPaths,
+                ScopeKind = ProjectScopeKind.Solution,
+            };
+            await ReloadPackagesAsync();
+        }
+
+        // Returns ("Solution: MySln", [csproj1, csproj2, ...]) for the open
+        // solution. Empty list when no solution is loaded.
+        private static async Task<(string DisplayName, IReadOnlyList<string> ProjectPaths)> EnumerateSolutionProjectsAsync()
+        {
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+            var solution = await VS.Solutions.GetCurrentSolutionAsync();
+            if (solution == null) return (string.Empty, Array.Empty<string>());
+
+            var projects = await VS.Solutions.GetAllProjectsAsync();
+            var paths = new List<string>();
+            foreach (var p in projects)
+            {
+                var path = p?.FullPath;
+                if (string.IsNullOrEmpty(path)) continue;
+                var ext = System.IO.Path.GetExtension(path);
+                if (string.Equals(ext, ".csproj", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(ext, ".vbproj", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(ext, ".fsproj", StringComparison.OrdinalIgnoreCase))
+                {
+                    paths.Add(path!);
+                }
+            }
+
+            var slnName = !string.IsNullOrEmpty(solution.Name)
+                ? System.IO.Path.GetFileNameWithoutExtension(solution.Name)
+                : "Solution";
+            return ($"Solution: {slnName}", paths);
         }
 
         public void ClearCurrentProject()
@@ -937,7 +995,16 @@ namespace NuGetManagerSlim.ViewModels
             {
                 SetStatus(msg);
                 AppendOperationLog($"[{DateTime.Now:HH:mm:ss}] {msg}");
-            }, async () => await ReloadPackagesAsync());
+            },
+            async () => await ReloadPackagesAsync(),
+            async (action, version) =>
+            {
+                // Solution-scope fan-out from the detail pane. The detail VM
+                // doesn't manage operation-in-progress state on a row, so we
+                // pass null recordMru and let the picker dialog itself drive
+                // the per-project UX.
+                await FanOutSolutionActionCoreAsync(row.PackageId, action, version, null);
+            });
 
             try
             {
@@ -1024,17 +1091,25 @@ namespace NuGetManagerSlim.ViewModels
         private async Task QuickUpdateAsync(PackageRowViewModel? row)
         {
             if (row == null) return;
+            if (row.LatestStableVersion == null) return;
+
             row.IsOperationInProgress = true;
             try
             {
-                SetStatus($"Updating {row.PackageId}…");
-                if (!string.IsNullOrEmpty(CurrentProject?.ProjectFullPath) && row.LatestStableVersion != null)
+                if (CurrentProject?.IsSolutionScope == true)
+                {
+                    await FanOutSolutionActionAsync(row, SolutionPackageAction.Update, row.LatestStableVersion);
+                }
+                else if (!string.IsNullOrEmpty(CurrentProject?.ProjectFullPath))
+                {
+                    SetStatus($"Updating {row.PackageId}…");
                     await _projectService.UpdatePackageAsync(CurrentProject!.ProjectFullPath, row.PackageId, row.LatestStableVersion, CancellationToken.None);
-                RecordMru(row, row.LatestStableVersion);
-                var done = $"✓ Updated {row.PackageId} → {row.LatestStableVersion}";
-                SetStatus(done);
-                AppendOperationLog($"[{DateTime.Now:HH:mm:ss}] {done}");
-                await ReloadPackagesAsync();
+                    RecordMru(row, row.LatestStableVersion);
+                    var done = $"✓ Updated {row.PackageId} → {row.LatestStableVersion}";
+                    SetStatus(done);
+                    AppendOperationLog($"[{DateTime.Now:HH:mm:ss}] {done}");
+                    await ReloadPackagesAsync();
+                }
             }
             catch (Exception ex)
             {
@@ -1057,16 +1132,20 @@ namespace NuGetManagerSlim.ViewModels
             row.IsOperationInProgress = true;
             try
             {
-                SetStatus($"Installing {row.PackageId}…");
-                if (!string.IsNullOrEmpty(CurrentProject?.ProjectFullPath))
+                if (CurrentProject?.IsSolutionScope == true)
                 {
-                    await _projectService.InstallPackageAsync(CurrentProject!.ProjectFullPath, row.PackageId, version, CancellationToken.None);
+                    await FanOutSolutionActionAsync(row, SolutionPackageAction.Install, version);
                 }
-                RecordMru(row, version);
-                var done = $"✓ Installed {row.PackageId} {version}";
-                SetStatus(done);
-                AppendOperationLog($"[{DateTime.Now:HH:mm:ss}] {done}");
-                await ReloadPackagesAsync();
+                else if (!string.IsNullOrEmpty(CurrentProject?.ProjectFullPath))
+                {
+                    SetStatus($"Installing {row.PackageId}…");
+                    await _projectService.InstallPackageAsync(CurrentProject!.ProjectFullPath, row.PackageId, version, CancellationToken.None);
+                    RecordMru(row, version);
+                    var done = $"✓ Installed {row.PackageId} {version}";
+                    SetStatus(done);
+                    AppendOperationLog($"[{DateTime.Now:HH:mm:ss}] {done}");
+                    await ReloadPackagesAsync();
+                }
             }
             catch (Exception ex)
             {
@@ -1086,15 +1165,19 @@ namespace NuGetManagerSlim.ViewModels
             row.IsOperationInProgress = true;
             try
             {
-                SetStatus($"Uninstalling {row.PackageId}…");
-                if (!string.IsNullOrEmpty(CurrentProject?.ProjectFullPath))
+                if (CurrentProject?.IsSolutionScope == true)
                 {
-                    await _projectService.UninstallPackageAsync(CurrentProject!.ProjectFullPath, row.PackageId, CancellationToken.None);
+                    await FanOutSolutionActionAsync(row, SolutionPackageAction.Uninstall, targetVersion: null);
                 }
-                var done = $"✓ Uninstalled {row.PackageId}";
-                SetStatus(done);
-                AppendOperationLog($"[{DateTime.Now:HH:mm:ss}] {done}");
-                await ReloadPackagesAsync();
+                else if (!string.IsNullOrEmpty(CurrentProject?.ProjectFullPath))
+                {
+                    SetStatus($"Uninstalling {row.PackageId}…");
+                    await _projectService.UninstallPackageAsync(CurrentProject!.ProjectFullPath, row.PackageId, CancellationToken.None);
+                    var done = $"✓ Uninstalled {row.PackageId}";
+                    SetStatus(done);
+                    AppendOperationLog($"[{DateTime.Now:HH:mm:ss}] {done}");
+                    await ReloadPackagesAsync();
+                }
             }
             catch (Exception ex)
             {
@@ -1105,6 +1188,104 @@ namespace NuGetManagerSlim.ViewModels
             {
                 row.IsOperationInProgress = false;
             }
+        }
+
+        // Solution-scope fan-out: show the per-project picker dialog,
+        // then call the same install / update / uninstall service methods
+        // we use in project scope for each project the user keeps checked.
+        // Failures on individual projects are logged but don't abort the
+        // remaining projects so partial successes are still visible.
+        private async Task FanOutSolutionActionAsync(
+            PackageRowViewModel row,
+            SolutionPackageAction action,
+            NuGetVersion? targetVersion)
+        {
+            await FanOutSolutionActionCoreAsync(row.PackageId, action, targetVersion, v =>
+            {
+                if (v != null) RecordMru(row, v);
+            });
+        }
+
+        // Row-less entry point so the package detail pane (which doesn't own a
+        // PackageRowViewModel for the operation-in-progress UI flag) can reuse
+        // the same fan-out path.
+        internal async Task FanOutSolutionActionCoreAsync(
+            string packageId,
+            SolutionPackageAction action,
+            NuGetVersion? targetVersion,
+            Action<NuGetVersion?>? recordMru)
+        {
+            var scope = CurrentProject;
+            if (scope == null || !scope.IsSolutionScope) return;
+            if (string.IsNullOrEmpty(packageId)) return;
+
+            var perProject = await _projectService.GetInstalledVersionsPerProjectAsync(scope, packageId, CancellationToken.None);
+            var rows = SolutionProjectPickerViewModel.BuildRows(action, scope.ProjectFullPaths, perProject);
+            if (rows.Count == 0)
+            {
+                SetStatus("No projects in the current solution scope.");
+                return;
+            }
+
+            var pickerVm = new SolutionProjectPickerViewModel(action, packageId, targetVersion, rows);
+            var dialog = new ToolWindows.SolutionProjectPickerDialog(pickerVm)
+            {
+                Owner = System.Windows.Application.Current?.MainWindow,
+            };
+            if (dialog.ShowDialog() != true) return;
+
+            var selected = pickerVm.SelectedProjects;
+            if (selected.Count == 0) return;
+
+            var verb = action switch
+            {
+                SolutionPackageAction.Install => "Installing",
+                SolutionPackageAction.Update => "Updating",
+                SolutionPackageAction.Uninstall => "Uninstalling",
+                _ => "Updating",
+            };
+            SetStatus($"{verb} {packageId} in {selected.Count} project(s)…");
+
+            int successCount = 0;
+            foreach (var sel in selected)
+            {
+                try
+                {
+                    switch (action)
+                    {
+                        case SolutionPackageAction.Install:
+                            if (targetVersion != null)
+                                await _projectService.InstallPackageAsync(sel.ProjectFullPath, packageId, targetVersion, CancellationToken.None);
+                            break;
+                        case SolutionPackageAction.Update:
+                            if (targetVersion != null)
+                                await _projectService.UpdatePackageAsync(sel.ProjectFullPath, packageId, targetVersion, CancellationToken.None);
+                            break;
+                        case SolutionPackageAction.Uninstall:
+                            await _projectService.UninstallPackageAsync(sel.ProjectFullPath, packageId, CancellationToken.None);
+                            break;
+                    }
+                    successCount++;
+                    AppendOperationLog($"[{DateTime.Now:HH:mm:ss}] ✓ {action} {packageId} in {sel.DisplayName}");
+                }
+                catch (Exception ex)
+                {
+                    AppendOperationLog($"[{DateTime.Now:HH:mm:ss}] ✗ {action} {packageId} in {sel.DisplayName}: {ex.Message}");
+                    await ex.LogAsync();
+                }
+            }
+
+            recordMru?.Invoke(targetVersion);
+
+            var summary = action switch
+            {
+                SolutionPackageAction.Install => $"✓ Installed {packageId} in {successCount}/{selected.Count} project(s)",
+                SolutionPackageAction.Update => $"✓ Updated {packageId} in {successCount}/{selected.Count} project(s)",
+                SolutionPackageAction.Uninstall => $"✓ Uninstalled {packageId} from {successCount}/{selected.Count} project(s)",
+                _ => string.Empty,
+            };
+            SetStatus(summary);
+            await ReloadPackagesAsync();
         }
 
         public void NavigateSearchHistory(int direction)
