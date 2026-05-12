@@ -81,7 +81,11 @@ jobs:
           encode() { python3 -c "import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=''))" "$1"; }
           url="https://www.vsixgallery.com/api/upload?repo=$(encode "$repo")&issuetracker=$(encode "${repo}issues/")&readmeUrl=$(encode "$readme")"
           echo "Uploading $VSIX_FILE..."
-          curl --fail --show-error -F "file=@${VSIX_FILE}" "$url"
+          if ! result=$(curl --silent --show-error --fail-with-body -F "file=@${VSIX_FILE}" "$url" 2>&1); then
+            echo "::error::Upload failed: $result"
+            exit 1
+          fi
+          echo "Upload successful"
 
       - name: Publish extension to Marketplace
         if: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[release]') }}
