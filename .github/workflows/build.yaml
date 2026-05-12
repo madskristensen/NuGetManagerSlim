@@ -46,8 +46,11 @@ jobs:
         manifest-file: ${{ env.VsixManifestPath }}
         vsix-token-source-file: ${{ env.VsixManifestSourcePath }}
 
+    - name: Restore NuGet packages
+      run: msbuild ${{ env.Solution }} /v:m -restore /t:Restore
+
     - name: Build
-      run: msbuild ${{ env.Solution }} /v:m -restore /p:Configuration=${{ env.Configuration }} /p:DeployExtension=${{ env.DeployExtension }}
+      run: msbuild ${{ env.Solution }} /v:m /m /p:Configuration=${{ env.Configuration }} /p:DeployExtension=${{ env.DeployExtension }}
 
     - name: Run tests
       run: dotnet test ${{ env.TestProject }} --configuration ${{ env.Configuration }} --no-build --no-restore --verbosity normal
@@ -65,6 +68,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
 
       - name: Download Package artifact
         uses: actions/download-artifact@v8
