@@ -3,7 +3,7 @@
   "categories": [ "connected services" ],
   "private": false,
   "identity": {
-    "internalName": "NuGetManagerSlim",
+    "internalName": "NuGetPackageManagerSlim",
     "tags": [ "nuget", "package" ]
   },
   "assetFiles": [
