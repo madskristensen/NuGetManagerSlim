@@ -159,5 +159,74 @@ namespace NuGetManagerSlim.Tests.Services
             // project file wins over 12.0.3 from the import.
             Assert.Equal("13.0.3", nj.InstalledVersion?.ToString());
         }
+
+        [Fact]
+        public void ReadInstalledFromProject_PackageReferenceWithVersionRange_CapturesAllowedRange()
+        {
+            var path = Path.Combine(_tempDir, "Sample.csproj");
+            File.WriteAllText(path, """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <ItemGroup>
+                    <PackageReference Include="EntityFrameworkCore.SqlServer.HierarchyId" Version="[1.2.0,2)" />
+                  </ItemGroup>
+                </Project>
+                """);
+
+            var packages = ProjectService.ReadInstalledFromProject(path).ToList();
+
+            Assert.Single(packages);
+            var pkg = packages[0];
+            Assert.Equal("EntityFrameworkCore.SqlServer.HierarchyId", pkg.PackageId);
+            Assert.Null(pkg.InstalledVersion);
+            Assert.NotNull(pkg.AllowedVersionRange);
+            Assert.True(pkg.AllowedVersionRange!.Satisfies(NuGet.Versioning.NuGetVersion.Parse("1.9.0")));
+            Assert.False(pkg.AllowedVersionRange!.Satisfies(NuGet.Versioning.NuGetVersion.Parse("2.0.0")));
+        }
+
+        [Fact]
+        public void ReadInstalledFromProject_PackagesConfigWithAllowedVersions_CapturesRange()
+        {
+            var path = Path.Combine(_tempDir, "Legacy.csproj");
+            File.WriteAllText(path, "<Project ToolsVersion=\"4.0\"><ItemGroup /></Project>");
+            File.WriteAllText(Path.Combine(_tempDir, "packages.config"), """
+                <?xml version="1.0" encoding="utf-8"?>
+                <packages>
+                  <package id="EntityFrameworkCore.SqlServer.HierarchyId" version="1.2.0" allowedVersions="[1.2.0,2)" targetFramework="net48" />
+                </packages>
+                """);
+
+            var packages = ProjectService.ReadInstalledFromProject(path).ToList();
+
+            Assert.Single(packages);
+            var pkg = packages[0];
+            Assert.Equal("EntityFrameworkCore.SqlServer.HierarchyId", pkg.PackageId);
+            Assert.Equal("1.2.0", pkg.InstalledVersion?.ToString());
+            Assert.NotNull(pkg.AllowedVersionRange);
+            Assert.True(pkg.AllowedVersionRange!.Satisfies(NuGet.Versioning.NuGetVersion.Parse("1.9.0")));
+            Assert.False(pkg.AllowedVersionRange!.Satisfies(NuGet.Versioning.NuGetVersion.Parse("2.0.0")));
+        }
+
+        [Fact]
+        public void MergeInstalled_PreservesAllowedVersionRangeWhenNewEntryHasIt()
+        {
+            var projDir = Path.Combine(_tempDir, "App");
+            Directory.CreateDirectory(projDir);
+            var proj = Path.Combine(projDir, "App.csproj");
+
+            // Exact version in csproj (as if NuGet API resolved it) + allowedVersions in packages.config
+            File.WriteAllText(proj, "<Project ToolsVersion=\"4.0\"><ItemGroup /></Project>");
+            File.WriteAllText(Path.Combine(projDir, "packages.config"), """
+                <?xml version="1.0" encoding="utf-8"?>
+                <packages>
+                  <package id="SomePkg" version="1.2.0" allowedVersions="[1.2.0,2)" targetFramework="net48" />
+                </packages>
+                """);
+
+            var packages = ProjectService.ReadInstalledFromProjectWithImports(proj, CancellationToken.None);
+
+            var pkg = Assert.Single(packages, p => p.PackageId == "SomePkg");
+            Assert.Equal("1.2.0", pkg.InstalledVersion?.ToString());
+            Assert.NotNull(pkg.AllowedVersionRange);
+        }
     }
 }

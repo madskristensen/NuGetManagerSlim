@@ -24,6 +24,34 @@ namespace NuGetManagerSlim.Models
         public DateTimeOffset? Published { get; init; }
         public IReadOnlyList<FrameworkVersionInfo> PerFrameworkVersions { get; init; } = [];
         public IReadOnlyList<PackageDependencyInfo> Dependencies { get; init; } = [];
+
+        // Version range constraint declared in the project file (e.g. allowedVersions
+        // in packages.config, or a range-syntax Version in PackageReference).
+        // When set, only updates that satisfy this range should be offered.
+        public VersionRange? AllowedVersionRange { get; init; }
+
+        internal PackageModel WithAllowedVersionRange(VersionRange? range) => new PackageModel
+        {
+            PackageId = PackageId,
+            InstalledVersion = InstalledVersion,
+            LatestStableVersion = LatestStableVersion,
+            LatestPrereleaseVersion = LatestPrereleaseVersion,
+            Description = Description,
+            Authors = Authors,
+            LicenseExpression = LicenseExpression,
+            LicenseUrl = LicenseUrl,
+            DownloadCount = DownloadCount,
+            SourceName = SourceName,
+            IsTransitive = IsTransitive,
+            RequiredByPackageId = RequiredByPackageId,
+            ReadmeUrl = ReadmeUrl,
+            ProjectUrl = ProjectUrl,
+            IconUrl = IconUrl,
+            Published = Published,
+            PerFrameworkVersions = PerFrameworkVersions,
+            Dependencies = Dependencies,
+            AllowedVersionRange = range,
+        };
     }
 
     public class PackageDependencyInfo

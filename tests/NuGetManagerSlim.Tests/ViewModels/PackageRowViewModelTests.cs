@@ -173,5 +173,44 @@ namespace NuGetManagerSlim.Tests.ViewModels
             var vm = new PackageRowViewModel(new PackageModel { PackageId = "Pkg" });
             Assert.Equal(string.Empty, vm.AuthorDisplay);
         }
+
+        [Fact]
+        public void HasUpdate_WhenLatestExceedsAllowedRange_ReturnsFalse()
+        {
+            var vm = new PackageRowViewModel(new PackageModel
+            {
+                PackageId = "TestPkg",
+                InstalledVersion = NuGetVersion.Parse("1.2.0"),
+                LatestStableVersion = NuGetVersion.Parse("3.0.0"),
+                AllowedVersionRange = NuGet.Versioning.VersionRange.Parse("[1.2.0,2)"),
+            });
+            Assert.False(vm.HasUpdate);
+        }
+
+        [Fact]
+        public void HasUpdate_WhenLatestWithinAllowedRange_ReturnsTrue()
+        {
+            var vm = new PackageRowViewModel(new PackageModel
+            {
+                PackageId = "TestPkg",
+                InstalledVersion = NuGetVersion.Parse("1.2.0"),
+                LatestStableVersion = NuGetVersion.Parse("1.9.0"),
+                AllowedVersionRange = NuGet.Versioning.VersionRange.Parse("[1.2.0,2)"),
+            });
+            Assert.True(vm.HasUpdate);
+        }
+
+        [Fact]
+        public void HasUpdate_WhenAllowedRangeIsNull_UsesVersionComparison()
+        {
+            var vm = new PackageRowViewModel(new PackageModel
+            {
+                PackageId = "TestPkg",
+                InstalledVersion = NuGetVersion.Parse("1.2.0"),
+                LatestStableVersion = NuGetVersion.Parse("3.0.0"),
+                AllowedVersionRange = null,
+            });
+            Assert.True(vm.HasUpdate);
+        }
     }
 }

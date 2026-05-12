@@ -56,6 +56,15 @@ namespace NuGetManagerSlim.Services
                             cancellationToken.ThrowIfCancellationRequested();
                             MergeInstalled(byId, pkg);
                         }
+
+                        // The NuGet API gives us resolved versions but not version range
+                        // constraints. Layer them in from the raw project XML so that
+                        // HasUpdate can respect allowedVersions / range-syntax Version.
+                        foreach (var pkg in ReadInstalledFromProject(projectPath))
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+                            MergeInstalled(byId, pkg);
+                        }
                     }
                     else
                     {
@@ -212,13 +221,18 @@ namespace NuGetManagerSlim.Services
                                      ?? packageRef.Elements().FirstOrDefault(e => e.Name.LocalName == "Version")?.Value;
 
                     NuGetVersion? version = null;
+                    VersionRange? allowedRange = null;
                     if (!string.IsNullOrWhiteSpace(versionRaw))
-                        NuGetVersion.TryParse(versionRaw, out version);
+                    {
+                        if (!NuGetVersion.TryParse(versionRaw, out version))
+                            VersionRange.TryParse(versionRaw, out allowedRange);
+                    }
 
                     yield return new PackageModel
                     {
                         PackageId = id!,
                         InstalledVersion = version,
+                        AllowedVersionRange = allowedRange,
                         SourceName = projectName,
                     };
                 }
@@ -243,10 +257,16 @@ namespace NuGetManagerSlim.Services
                         if (!string.IsNullOrWhiteSpace(versionRaw))
                             NuGetVersion.TryParse(versionRaw, out version);
 
+                        var allowedVersionsRaw = (string?)package.Attribute("allowedVersions");
+                        VersionRange? allowedRange = null;
+                        if (!string.IsNullOrWhiteSpace(allowedVersionsRaw))
+                            VersionRange.TryParse(allowedVersionsRaw, out allowedRange);
+
                         yield return new PackageModel
                         {
                             PackageId = id!,
                             InstalledVersion = version,
+                            AllowedVersionRange = allowedRange,
                             SourceName = projectName,
                         };
                     }
@@ -376,7 +396,16 @@ namespace NuGetManagerSlim.Services
 
             if (newer)
             {
-                byId[pkg.PackageId] = pkg;
+                // Keep the higher version, but preserve AllowedVersionRange from
+                // whichever entry has it.
+                byId[pkg.PackageId] = existing.AllowedVersionRange != null && pkg.AllowedVersionRange == null
+                    ? pkg.WithAllowedVersionRange(existing.AllowedVersionRange)
+                    : pkg;
+            }
+            else if (pkg.AllowedVersionRange != null && existing.AllowedVersionRange == null)
+            {
+                // Carry over the range constraint to the entry we're keeping.
+                byId[pkg.PackageId] = existing.WithAllowedVersionRange(pkg.AllowedVersionRange);
             }
         }
 

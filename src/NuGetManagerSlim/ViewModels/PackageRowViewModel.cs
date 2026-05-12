@@ -59,6 +59,7 @@ namespace NuGetManagerSlim.ViewModels
                     IconUrl = _iconUrlOverride ?? metadata.IconUrl,
                     PerFrameworkVersions = _model.PerFrameworkVersions,
                     Dependencies = _model.Dependencies,
+                    AllowedVersionRange = _model.AllowedVersionRange,
                 };
                 OnPropertyChanged(nameof(AuthorDisplay));
                 OnPropertyChanged(nameof(HasUpdate));
@@ -86,6 +87,7 @@ namespace NuGetManagerSlim.ViewModels
                     IconUrl = _iconUrlOverride ?? metadata.IconUrl,
                     PerFrameworkVersions = _model.PerFrameworkVersions,
                     Dependencies = _model.Dependencies,
+                    AllowedVersionRange = _model.AllowedVersionRange,
                 };
                 OnPropertyChanged(nameof(HasUpdate));
                 OnPropertyChanged(nameof(UpdateBadge));
@@ -111,7 +113,8 @@ namespace NuGetManagerSlim.ViewModels
         public bool HasUpdate => IsInstalled
             && !IsTransitive
             && _model.LatestStableVersion != null
-            && _model.LatestStableVersion > _model.InstalledVersion;
+            && _model.LatestStableVersion > _model.InstalledVersion
+            && (_model.AllowedVersionRange == null || _model.AllowedVersionRange.Satisfies(_model.LatestStableVersion));
 
         public string InstalledVersionDisplay
         {
