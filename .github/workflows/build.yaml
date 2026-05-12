@@ -72,20 +72,9 @@ jobs:
           name: ${{ github.event.repository.name }}.vsix
 
       - name: Upload to Open VSIX
-        shell: bash
-        env:
-          VSIX_FILE: ${{ github.event.repository.name }}.vsix
-        run: |
-          repo="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/"
-          readme="${GITHUB_REF_NAME}/README.md"
-          encode() { python3 -c "import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1],safe=''))" "$1"; }
-          url="https://www.vsixgallery.com/api/upload?repo=$(encode "$repo")&issuetracker=$(encode "${repo}issues/")&readmeUrl=$(encode "$readme")"
-          echo "Uploading $VSIX_FILE..."
-          if ! result=$(curl --silent --show-error --fail-with-body -F "file=@${VSIX_FILE}" "$url" 2>&1); then
-            echo "::error::Upload failed: $result"
-            exit 1
-          fi
-          echo "Upload successful"
+        uses: madskristensen/publish-vsixgallery@v1
+        with:
+          vsix-file: ${{ github.event.repository.name }}.vsix
 
       - name: Publish extension to Marketplace
         if: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[release]') }}
