@@ -95,5 +95,15 @@ namespace NuGetManagerSlim.Tests.Services
             var entries = await svc.GetRecentAsync(CancellationToken.None);
             Assert.Empty(entries);
         }
+
+        [Fact]
+        public async Task RecordAsync_IgnoresNullPackageId()
+        {
+            var svc = CreateService();
+            await svc.RecordAsync(new PackageModel { PackageId = null! }, CancellationToken.None);
+
+            var entries = await svc.GetRecentAsync(CancellationToken.None);
+            Assert.Empty(entries);
+        }
     }
 }

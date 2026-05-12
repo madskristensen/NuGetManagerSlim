@@ -167,6 +167,136 @@ namespace NuGetManagerSlim.Tests.ViewModels
             await vm.LoadAsync(row, scope, false, CancellationToken.None);
             Assert.False(vm.CanUpdateAllProjects);
         }
+
+        [Fact]
+        public async Task LoadAsync_TransitivePackage_CannotUninstall()
+        {
+            var (vm, _, _, _) = CreateViewModel();
+            var row = new PackageRowViewModel(new PackageModel
+            {
+                PackageId = "TestPkg",
+                InstalledVersion = NuGetVersion.Parse("1.0.0"),
+                IsTransitive = true,
+            });
+            await vm.LoadAsync(row, new ProjectScopeModel { DisplayName = "MyApp", ProjectFullPath = @"C:\x\x.csproj" }, false, CancellationToken.None);
+            Assert.False(vm.CanUninstall);
+        }
+
+        [Fact]
+        public async Task LoadAsync_DownloadCountZero_DisplaysNA()
+        {
+            var feedMock = new Mock<INuGetFeedService>();
+            var projMock = new Mock<IProjectService>();
+
+            feedMock.Setup(f => f.GetVersionsAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<NuGetVersion> { NuGetVersion.Parse("1.0.0") });
+            feedMock.Setup(f => f.GetPackageMetadataAsync(It.IsAny<string>(), It.IsAny<NuGetVersion>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new PackageModel { PackageId = "TestPkg", DownloadCount = 0 });
+
+            var vm = new PackageDetailViewModel(feedMock.Object, projMock.Object, _ => { });
+            await vm.LoadAsync(MakeRow(), new ProjectScopeModel { DisplayName = "MyApp", ProjectFullPath = @"C:\x\x.csproj" }, false, CancellationToken.None);
+
+            Assert.Equal("N/A", vm.DownloadCountDisplay);
+        }
+
+        [Fact]
+        public async Task LoadAsync_DownloadCountBillions_FormatsBSuffix()
+        {
+            var feedMock = new Mock<INuGetFeedService>();
+            var projMock = new Mock<IProjectService>();
+
+            feedMock.Setup(f => f.GetVersionsAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<NuGetVersion> { NuGetVersion.Parse("1.0.0") });
+            feedMock.Setup(f => f.GetPackageMetadataAsync(It.IsAny<string>(), It.IsAny<NuGetVersion>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new PackageModel { PackageId = "TestPkg", DownloadCount = 2_000_000_000 });
+
+            var vm = new PackageDetailViewModel(feedMock.Object, projMock.Object, _ => { });
+            await vm.LoadAsync(MakeRow(), new ProjectScopeModel { DisplayName = "MyApp", ProjectFullPath = @"C:\x\x.csproj" }, false, CancellationToken.None);
+
+            Assert.Equal("2.0B", vm.DownloadCountDisplay);
+        }
+
+        [Fact]
+        public async Task LoadAsync_DownloadCountThousands_FormatsKSuffix()
+        {
+            var feedMock = new Mock<INuGetFeedService>();
+            var projMock = new Mock<IProjectService>();
+
+            feedMock.Setup(f => f.GetVersionsAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<NuGetVersion> { NuGetVersion.Parse("1.0.0") });
+            feedMock.Setup(f => f.GetPackageMetadataAsync(It.IsAny<string>(), It.IsAny<NuGetVersion>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new PackageModel { PackageId = "TestPkg", DownloadCount = 7_500 });
+
+            var vm = new PackageDetailViewModel(feedMock.Object, projMock.Object, _ => { });
+            await vm.LoadAsync(MakeRow(), new ProjectScopeModel { DisplayName = "MyApp", ProjectFullPath = @"C:\x\x.csproj" }, false, CancellationToken.None);
+
+            Assert.Equal("7.5K", vm.DownloadCountDisplay);
+        }
+
+        [Fact]
+        public async Task LoadAsync_PopulatesDependencyGroups()
+        {
+            var feedMock = new Mock<INuGetFeedService>();
+            var projMock = new Mock<IProjectService>();
+
+            feedMock.Setup(f => f.GetVersionsAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<NuGetVersion> { NuGetVersion.Parse("1.0.0") });
+            feedMock.Setup(f => f.GetPackageMetadataAsync(It.IsAny<string>(), It.IsAny<NuGetVersion>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new PackageModel
+                {
+                    PackageId = "TestPkg",
+                    DownloadCount = 1,
+                    Dependencies = new List<PackageDependencyInfo>
+                    {
+                        new() { PackageId = "A", VersionRange = "[1,)", TargetFramework = "net8.0" },
+                        new() { PackageId = "B", VersionRange = "[2,)", TargetFramework = "net48" },
+                    },
+                });
+
+            var vm = new PackageDetailViewModel(feedMock.Object, projMock.Object, _ => { });
+            await vm.LoadAsync(MakeRow(), new ProjectScopeModel { DisplayName = "MyApp", ProjectFullPath = @"C:\x\x.csproj" }, false, CancellationToken.None);
+
+            Assert.Equal(2, vm.DependencyGroups.Count);
+            Assert.Contains(vm.DependencyGroups, g => g.TargetFramework == "net48");
+            Assert.Contains(vm.DependencyGroups, g => g.TargetFramework == "net8.0");
+        }
+
+        [Fact]
+        public async Task LoadAsync_WithPublishedDate_SetsHasPublished()
+        {
+            var feedMock = new Mock<INuGetFeedService>();
+            var projMock = new Mock<IProjectService>();
+            var published = new System.DateTimeOffset(2023, 6, 15, 0, 0, 0, System.TimeSpan.Zero);
+
+            feedMock.Setup(f => f.GetVersionsAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<NuGetVersion> { NuGetVersion.Parse("1.0.0") });
+            feedMock.Setup(f => f.GetPackageMetadataAsync(It.IsAny<string>(), It.IsAny<NuGetVersion>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new PackageModel { PackageId = "TestPkg", DownloadCount = 1, Published = published });
+
+            var vm = new PackageDetailViewModel(feedMock.Object, projMock.Object, _ => { });
+            await vm.LoadAsync(MakeRow(), new ProjectScopeModel { DisplayName = "MyApp", ProjectFullPath = @"C:\x\x.csproj" }, false, CancellationToken.None);
+
+            Assert.True(vm.HasPublished);
+            Assert.False(string.IsNullOrEmpty(vm.PublishedDisplay));
+        }
+
+        [Fact]
+        public async Task LoadAsync_WithProjectUrl_SetsHasProjectUrl()
+        {
+            var feedMock = new Mock<INuGetFeedService>();
+            var projMock = new Mock<IProjectService>();
+
+            feedMock.Setup(f => f.GetVersionsAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<NuGetVersion> { NuGetVersion.Parse("1.0.0") });
+            feedMock.Setup(f => f.GetPackageMetadataAsync(It.IsAny<string>(), It.IsAny<NuGetVersion>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new PackageModel { PackageId = "TestPkg", DownloadCount = 1, ProjectUrl = "https://example.com" });
+
+            var vm = new PackageDetailViewModel(feedMock.Object, projMock.Object, _ => { });
+            await vm.LoadAsync(MakeRow(), new ProjectScopeModel { DisplayName = "MyApp", ProjectFullPath = @"C:\x\x.csproj" }, false, CancellationToken.None);
+
+            Assert.True(vm.HasProjectUrl);
+            Assert.Equal("https://example.com", vm.ProjectUrl);
+        }
     }
 }
 

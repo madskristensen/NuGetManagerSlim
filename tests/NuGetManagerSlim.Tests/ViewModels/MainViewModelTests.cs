@@ -248,5 +248,44 @@ namespace NuGetManagerSlim.Tests.ViewModels
             var ex = Record.Exception(() => vm.Dispose());
             Assert.Null(ex);
         }
+
+        [Fact]
+        public async Task SetSelectedPackages_Empty_ClearsSelection()
+        {
+            var (vm, _, _, _) = CreateViewModel();
+            await vm.InitializeAsync(CancellationToken.None);
+            vm.SetSelectedPackages(System.Array.Empty<PackageRowViewModel>());
+            Assert.Null(vm.SelectedPackage);
+            Assert.Null(vm.MultiSelection);
+            Assert.False(vm.HasSelectedPackage);
+        }
+
+        [Fact]
+        public async Task SetSelectedPackages_SingleRow_SetsSelectedPackage()
+        {
+            var (vm, _, _, _) = CreateViewModel();
+            await vm.InitializeAsync(CancellationToken.None);
+            var row = new PackageRowViewModel(new PackageModel { PackageId = "Pkg" });
+            vm.SetSelectedPackages(new[] { row });
+            Assert.Equal(row, vm.SelectedPackage);
+            Assert.Null(vm.MultiSelection);
+            Assert.True(vm.HasSelectedPackage);
+        }
+
+        [Fact]
+        public async Task SetSelectedPackages_MultipleRows_SetsMultiSelection()
+        {
+            var (vm, _, _, _) = CreateViewModel();
+            await vm.InitializeAsync(CancellationToken.None);
+            var rows = new[]
+            {
+                new PackageRowViewModel(new PackageModel { PackageId = "Pkg1" }),
+                new PackageRowViewModel(new PackageModel { PackageId = "Pkg2" }),
+            };
+            vm.SetSelectedPackages(rows);
+            Assert.Null(vm.SelectedPackage);
+            Assert.NotNull(vm.MultiSelection);
+            Assert.Equal(2, vm.MultiSelection!.Count);
+        }
     }
 }
