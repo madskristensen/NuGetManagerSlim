@@ -175,8 +175,11 @@ namespace NuGetManagerSlim.Tests.ViewModels
         }
 
         [Fact]
-        public void HasUpdate_WhenLatestExceedsAllowedRange_ReturnsFalse()
+        public void HasUpdate_WhenLatestExceedsAllowedRange_ReturnsTrue()
         {
+            // AllowedVersionRange caps the target version during install but does not
+            // affect whether an update is shown. The absolute latest (3.0.0) exceeds the
+            // range, but a newer version may still exist within the range (e.g. 1.9.0).
             var vm = new PackageRowViewModel(new PackageModel
             {
                 PackageId = "TestPkg",
@@ -184,7 +187,7 @@ namespace NuGetManagerSlim.Tests.ViewModels
                 LatestStableVersion = NuGetVersion.Parse("3.0.0"),
                 AllowedVersionRange = NuGet.Versioning.VersionRange.Parse("[1.2.0,2)"),
             });
-            Assert.False(vm.HasUpdate);
+            Assert.True(vm.HasUpdate);
         }
 
         [Fact]

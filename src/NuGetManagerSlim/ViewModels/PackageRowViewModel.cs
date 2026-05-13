@@ -113,8 +113,7 @@ namespace NuGetManagerSlim.ViewModels
         public bool HasUpdate => IsInstalled
             && !IsTransitive
             && _model.LatestStableVersion != null
-            && _model.LatestStableVersion > _model.InstalledVersion
-            && (_model.AllowedVersionRange == null || _model.AllowedVersionRange.Satisfies(_model.LatestStableVersion));
+            && _model.LatestStableVersion > _model.InstalledVersion;
 
         public string InstalledVersionDisplay
         {

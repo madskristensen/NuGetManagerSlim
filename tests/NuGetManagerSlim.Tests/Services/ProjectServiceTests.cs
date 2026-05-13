@@ -228,5 +228,47 @@ namespace NuGetManagerSlim.Tests.Services
             Assert.Equal("1.2.0", pkg.InstalledVersion?.ToString());
             Assert.NotNull(pkg.AllowedVersionRange);
         }
+
+        [Fact]
+        public void MergeInstalled_DoesNotContaminateHigherVersionWithUnrelatedRange()
+        {
+            // Regression test for issue #5.
+            // When Project A has PkgX at 1.5.0 with allowedVersions="[1.0,2)" and
+            // Project B has PkgX at 7.0.0 with no constraint, the merged entry should
+            // keep the higher version (7.0.0) WITHOUT inheriting the [1.0,2) range.
+            // Simulated via a single project directory where both a .csproj (high version,
+            // SDK-style PackageReference) and packages.config (low version, range) contribute
+            // entries for the same package - exercising the same MergeInstalled code paths.
+            var projDir = Path.Combine(_tempDir, "Multi");
+            Directory.CreateDirectory(projDir);
+            var proj = Path.Combine(projDir, "Multi.csproj");
+
+            // SDK-style csproj: PkgX at 7.0.0 (no range)
+            File.WriteAllText(proj, """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup><TargetFramework>net48</TargetFramework></PropertyGroup>
+                  <ItemGroup>
+                    <PackageReference Include="PkgX" Version="7.0.0" />
+                  </ItemGroup>
+                </Project>
+                """);
+
+            // packages.config: PkgX at 1.5.0 with allowedVersions="[1.0,2)"
+            File.WriteAllText(Path.Combine(projDir, "packages.config"), """
+                <?xml version="1.0" encoding="utf-8"?>
+                <packages>
+                  <package id="PkgX" version="1.5.0" allowedVersions="[1.0,2)" targetFramework="net48" />
+                </packages>
+                """);
+
+            var packages = ProjectService.ReadInstalledFromProjectWithImports(proj, CancellationToken.None);
+
+            var pkg = Assert.Single(packages, p => p.PackageId == "PkgX");
+            // Must keep the higher version.
+            Assert.Equal("7.0.0", pkg.InstalledVersion?.ToString());
+            // The range from the lower-version entry must NOT bleed onto the 7.0.0 entry
+            // because 7.0.0 does not satisfy [1.0,2).
+            Assert.Null(pkg.AllowedVersionRange);
+        }
     }
 }

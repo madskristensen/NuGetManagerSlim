@@ -1,13 +1,14 @@
-# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+# yaml-language-server: $schema=https://www.schemastore.org/github-workflow.json
 name: "Build"
 permissions:
   actions: write
+  checks: write
   contents: write
 
 on:
   push:
     branches: [master]
-  pull_request:
+  pull_request_target:
     branches: [master]
   workflow_dispatch:
 
@@ -27,6 +28,9 @@ jobs:
 
     steps:
     - uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.sha }}
+        persist-credentials: false
 
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v3
@@ -53,7 +57,15 @@ jobs:
       run: msbuild ${{ env.Solution }} /v:m /m /p:Configuration=${{ env.Configuration }} /p:DeployExtension=${{ env.DeployExtension }}
 
     - name: Run tests
-      run: dotnet test ${{ env.TestProject }} --configuration ${{ env.Configuration }} --no-build --no-restore --verbosity normal
+      run: dotnet test ${{ env.TestProject }} --configuration ${{ env.Configuration }} --no-build --no-restore --verbosity normal --logger "trx;LogFileName=test-results.trx"
+
+    - name: Report test results
+      uses: dorny/test-reporter@v3
+      if: ${{ always() && (github.event_name != 'pull_request_target' || github.event.pull_request.head.repo.full_name == github.repository) }}
+      with:
+        name: Test Results
+        path: '**/test-results.trx'
+        reporter: dotnet-trx
 
     - name: Upload artifact
       uses: actions/upload-artifact@v7

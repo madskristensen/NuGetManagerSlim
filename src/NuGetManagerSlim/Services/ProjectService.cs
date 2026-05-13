@@ -396,16 +396,26 @@ namespace NuGetManagerSlim.Services
 
             if (newer)
             {
-                // Keep the higher version, but preserve AllowedVersionRange from
-                // whichever entry has it.
-                byId[pkg.PackageId] = existing.AllowedVersionRange != null && pkg.AllowedVersionRange == null
+                // Keep the higher version. Only carry AllowedVersionRange from the existing entry
+                // when the newer InstalledVersion still falls within that range - this prevents a
+                // range constraint from one project from leaking onto a higher version resolved by
+                // a different project in the same solution.
+                byId[pkg.PackageId] = existing.AllowedVersionRange != null
+                    && pkg.AllowedVersionRange == null
+                    && existing.AllowedVersionRange.Satisfies(pkg.InstalledVersion!)
                     ? pkg.WithAllowedVersionRange(existing.AllowedVersionRange)
                     : pkg;
             }
             else if (pkg.AllowedVersionRange != null && existing.AllowedVersionRange == null)
             {
-                // Carry over the range constraint to the entry we're keeping.
-                byId[pkg.PackageId] = existing.WithAllowedVersionRange(pkg.AllowedVersionRange);
+                // Carry over the range constraint only when the existing InstalledVersion falls
+                // within the incoming range. Without this guard a range constraint declared in
+                // one project can contaminate a higher-versioned entry from another project.
+                if (existing.InstalledVersion == null
+                    || pkg.AllowedVersionRange.Satisfies(existing.InstalledVersion))
+                {
+                    byId[pkg.PackageId] = existing.WithAllowedVersionRange(pkg.AllowedVersionRange);
+                }
             }
         }
 
