@@ -5,6 +5,7 @@
 # NuGet Manager Slim for Visual Studio
 
 [![Build](https://github.com/madskristensen/NuGetManagerSlim/actions/workflows/build.yaml/badge.svg)](https://github.com/madskristensen/NuGetManagerSlim/actions/workflows/build.yaml)
+[![Install from VSIX Gallery](https://www.vsixgallery.com/badge/NuGetManagerSlim.02b52d4a-302c-45d8-9d1f-9cc4759f30bf.svg)][vsixgallery]
 [![GitHub Sponsors](https://img.shields.io/github/sponsors/madskristensen)](https://github.com/sponsors/madskristensen)
 
 **A faster, lighter NuGet Package Manager for Visual Studio.** One dockable tool window, one filterable list, no blocking dialogs.
