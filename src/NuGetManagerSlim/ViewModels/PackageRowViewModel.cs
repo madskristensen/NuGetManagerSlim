@@ -1,8 +1,8 @@
+using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using NuGet.Versioning;
 using NuGetManagerSlim.Models;
 using NuGetManagerSlim.Services;
-using System.Windows.Media;
 
 namespace NuGetManagerSlim.ViewModels
 {
@@ -27,7 +27,8 @@ namespace NuGetManagerSlim.ViewModels
 
         public void ApplyMetadata(PackageModel metadata)
         {
-            if (metadata == null) return;
+            if (metadata == null)
+                return;
             if (!string.IsNullOrEmpty(metadata.IconUrl))
             {
                 _iconUrlOverride = metadata.IconUrl;
@@ -63,6 +64,7 @@ namespace NuGetManagerSlim.ViewModels
                 };
                 OnPropertyChanged(nameof(AuthorDisplay));
                 OnPropertyChanged(nameof(HasUpdate));
+                OnPropertyChanged(nameof(VersionInformation));
                 OnPropertyChanged(nameof(UpdateBadge));
                 OnPropertyChanged(nameof(DownloadCountDisplay));
             }
@@ -90,6 +92,7 @@ namespace NuGetManagerSlim.ViewModels
                     AllowedVersionRange = _model.AllowedVersionRange,
                 };
                 OnPropertyChanged(nameof(HasUpdate));
+                OnPropertyChanged(nameof(VersionInformation));
                 OnPropertyChanged(nameof(UpdateBadge));
                 OnPropertyChanged(nameof(DownloadCountDisplay));
             }
@@ -128,6 +131,24 @@ namespace NuGetManagerSlim.ViewModels
             }
         }
 
+        public string VersionInformation
+        {
+            get
+            {
+                if (IsInstalled)
+                {
+                    return HasUpdate
+                        ? $"v{_model.InstalledVersion} → v{_model.LatestStableVersion}"
+                        : $"v{_model.InstalledVersion}";
+                }
+                else
+                {
+                    var latest = _model.LatestStableVersion ?? _model.LatestPrereleaseVersion;
+                    return latest != null ? $"v{latest}" : string.Empty;
+                }
+            }
+        }
+
         public string UpdateBadge => HasUpdate ? $"→ {_model.LatestStableVersion}" : string.Empty;
 
         public string AuthorDisplay => string.IsNullOrEmpty(_model.Authors) ? string.Empty : $"by {_model.Authors}";
@@ -138,9 +159,12 @@ namespace NuGetManagerSlim.ViewModels
 
         private static string FormatDownloadCount(long count)
         {
-            if (count >= 1_000_000_000) return $"{count / 1_000_000_000.0:F1}B";
-            if (count >= 1_000_000) return $"{count / 1_000_000.0:F1}M";
-            if (count >= 1_000) return $"{count / 1_000.0:F1}K";
+            if (count >= 1_000_000_000)
+                return $"{count / 1_000_000_000.0:F1}B";
+            if (count >= 1_000_000)
+                return $"{count / 1_000_000.0:F1}M";
+            if (count >= 1_000)
+                return $"{count / 1_000.0:F1}K";
             return count.ToString();
         }
 
@@ -156,8 +180,10 @@ namespace NuGetManagerSlim.ViewModels
         {
             get
             {
-                if (_model.IsTransitive) return "Transitive packages";
-                if (IsInstalled) return "Installed";
+                if (_model.IsTransitive)
+                    return "Transitive packages";
+                if (IsInstalled)
+                    return "Installed";
                 return "Packages";
             }
         }
@@ -193,7 +219,8 @@ namespace NuGetManagerSlim.ViewModels
         private async System.Threading.Tasks.Task LoadIconAsync()
         {
             var url = IconUrl;
-            if (string.IsNullOrEmpty(url)) return;
+            if (string.IsNullOrEmpty(url))
+                return;
             var image = await IconCacheService.Instance.GetIconAsync(url).ConfigureAwait(true);
             if (image != null)
             {
@@ -211,7 +238,8 @@ namespace NuGetManagerSlim.ViewModels
         // placeholder takes over and survives ItemsControl virtualization.
         public void MarkIconFailed()
         {
-            if (_iconFailed) return;
+            if (_iconFailed)
+                return;
             _iconFailed = true;
             _icon = null;
             OnPropertyChanged(nameof(HasIcon));
