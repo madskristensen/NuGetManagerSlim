@@ -10,21 +10,19 @@ namespace NuGetManagerSlim.Commands
     [Command(PackageIds.OpenForProjectCommand)]
     internal sealed class OpenForProjectCommand : BaseCommand<OpenForProjectCommand>
     {
-        // Visibility is controlled declaratively via <VisibilityConstraints> in
-        // VSCommandTable.vsct combined with a ProvideUIContextRule attribute on
-        // NuGetManagerSlimPackage that activates when the right-clicked
-        // hierarchy item is a .csproj / .vbproj / .fsproj. No BeforeQueryStatus
-        // override is needed.
-
-        protected override Task InitializeCompletedAsync()
+        protected override void BeforeQueryStatus(EventArgs e)
         {
-            // Tell the shell this command does NOT manage its own visibility,
-            // so the <VisibilityConstraints> UIContext rule keeps governing
-            // visibility even after the package is loaded. Without this, the
-            // Toolkit's OleMenuCommand wrapper would default Supported = true
-            // and the command could appear in contexts the rule excludes.
-            Command.Supported = false;
-            return Task.CompletedTask;
+            ThreadHelper.ThrowIfNotOnUIThread();
+            // Once the package is loaded, this command's OleMenuCommand becomes the
+            // authority for its own visibility, so the <VisibilityConstraints>
+            // UIContext rule in the .vsct no longer governs it. Replicate that rule
+            // here so the command stays scoped to .cs/.vb/.fsproj selections.
+            var dotNetProjectContext = UIContext.FromUIContextGuid(new Guid(UIContextGuids.DotNetProjectContextString));
+            Command.Visible = dotNetProjectContext.IsActive;
+
+            // Match the built-in NuGet Package Manager behavior by disabling the
+            // command while a solution build is in progress.
+            Command.Enabled = !KnownUIContexts.SolutionBuildingContext.IsActive;
         }
 
         protected override async Task ExecuteAsync(OleMenuCmdEventArgs e)

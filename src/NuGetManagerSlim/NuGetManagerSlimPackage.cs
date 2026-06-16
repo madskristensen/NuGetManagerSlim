@@ -2,6 +2,7 @@ using System;
 using System.Runtime.InteropServices;
 using System.Threading;
 using Community.VisualStudio.Toolkit;
+using Microsoft.VisualStudio;
 using Microsoft.VisualStudio.Shell;
 using NuGetManagerSlim.ToolWindows;
 using Task = System.Threading.Tasks.Task;
@@ -11,6 +12,9 @@ namespace NuGetManagerSlim
     [PackageRegistration(UseManagedResourcesOnly = true, AllowsBackgroundLoading = true)]
     [InstalledProductRegistration(Vsix.Name, Vsix.Description, Vsix.Version)]
     [ProvideMenuResource("Menus.ctmenu", 1)]
+    // Background-load when a build starts so the OpenFor* commands' BeforeQueryStatus
+    // runs and grays them out during builds, matching the built-in NuGet manager.
+    [ProvideAutoLoad(VSConstants.UICONTEXT.SolutionBuilding_string, PackageAutoLoadFlags.BackgroundLoad)]
     [ProvideToolWindow(
         typeof(NuGetQuickManagerToolWindow.Pane),
         Style = VsDockStyle.Tabbed,
