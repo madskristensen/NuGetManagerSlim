@@ -273,8 +273,14 @@
                           Visibility="{Binding ShowSkeleton, Converter={StaticResource BoolToVis}}">
                 <ItemsControl.ItemsSource>
                     <x:Array Type="{x:Type sys:Object}" xmlns:sys="clr-namespace:System;assembly=mscorlib">
-                        <sys:Object /><sys:Object /><sys:Object /><sys:Object />
-                        <sys:Object /><sys:Object /><sys:Object /><sys:Object />
+                        <sys:Object />
+                        <sys:Object />
+                        <sys:Object />
+                        <sys:Object />
+                        <sys:Object />
+                        <sys:Object />
+                        <sys:Object />
+                        <sys:Object />
                     </x:Array>
                 </ItemsControl.ItemsSource>
                 <ItemsControl.ItemTemplate>
@@ -399,6 +405,8 @@
                                 <TextBlock Text=" [pre]" FontSize="10" VerticalAlignment="Center"
                                            Foreground="{DynamicResource {x:Static vsshell:VsBrushes.GrayTextKey}}"
                                            Visibility="{Binding IsPrerelease, Converter={StaticResource BoolToVis}}" />
+                                <TextBlock Text="{Binding VersionInformation}" FontSize="9" FontWeight="SemiBold"
+                                           Margin="6,0,0,0" VerticalAlignment="Center" />
                             </StackPanel>
 
                             <!-- Downloads + author. The update arrow icon in the action area
@@ -451,43 +459,43 @@
                                                         Moniker="{x:Static catalog:KnownMonikers.StatusUpdateAvailable}" />
                                 </Button>
                                 <StackPanel Orientation="Vertical" HorizontalAlignment="Center">
-                                <StackPanel.Style>
-                                    <Style TargetType="StackPanel">
-                                        <Setter Property="Visibility" Value="Hidden" />
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
-                                                <Setter Property="Visibility" Value="Visible" />
-                                            </DataTrigger>
-                                            <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
-                                                <Setter Property="Visibility" Value="Visible" />
-                                            </DataTrigger>
-                                            <DataTrigger Binding="{Binding IsKeyboardFocusWithin, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
-                                                <Setter Property="Visibility" Value="Visible" />
-                                            </DataTrigger>
-                                            <!-- Stay visible while an install/update/uninstall is running so
+                                    <StackPanel.Style>
+                                        <Style TargetType="StackPanel">
+                                            <Setter Property="Visibility" Value="Hidden" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding IsKeyboardFocusWithin, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                </DataTrigger>
+                                                <!-- Stay visible while an install/update/uninstall is running so
                                                  the spinner is always shown (even after the mouse leaves). -->
-                                            <DataTrigger Binding="{Binding IsOperationInProgress}" Value="True">
-                                                <Setter Property="Visibility" Value="Visible" />
-                                            </DataTrigger>
-                                            <!-- Hide the row's quick-action icons while a multi-select is
+                                                <DataTrigger Binding="{Binding IsOperationInProgress}" Value="True">
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                </DataTrigger>
+                                                <!-- Hide the row's quick-action icons while a multi-select is
                                                  active. The bulk Install / Update / Uninstall buttons in
                                                  the detail pane own that interaction instead. -->
-                                            <DataTrigger Binding="{Binding DataContext.HasMultiSelection, RelativeSource={RelativeSource AncestorType=ListBox}}" Value="True">
-                                                <Setter Property="Visibility" Value="Hidden" />
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </StackPanel.Style>
+                                                <DataTrigger Binding="{Binding DataContext.HasMultiSelection, RelativeSource={RelativeSource AncestorType=ListBox}}" Value="True">
+                                                    <Setter Property="Visibility" Value="Hidden" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </StackPanel.Style>
 
-                                <!-- Spinner shown while a row-level operation is running. Replaces the
+                                    <!-- Spinner shown while a row-level operation is running. Replaces the
                                      three action buttons with a single rotating progress glyph.
                                      Vector-drawn (Ellipse with dashed stroke) so it stays crisp under
                                      the continuous RotateTransform; CrispImage's pixel snapping makes
                                      raster icons look blurry while spinning. -->
-                                <Grid Width="20" Height="20"
+                                    <Grid Width="20" Height="20"
                                       Visibility="{Binding IsOperationInProgress, Converter={StaticResource BoolToVis}}"
                                       ToolTip="Working...">
-                                    <Ellipse Width="14" Height="14"
+                                        <Ellipse Width="14" Height="14"
                                              Stroke="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowTextKey}}"
                                              StrokeThickness="2"
                                              StrokeDashArray="3 1.5"
@@ -496,66 +504,66 @@
                                              RenderTransformOrigin="0.5,0.5"
                                              SnapsToDevicePixels="False"
                                              UseLayoutRounding="False">
-                                        <Ellipse.RenderTransform>
-                                            <RotateTransform x:Name="QuickActionSpinnerRotate" Angle="0" />
-                                        </Ellipse.RenderTransform>
-                                        <Ellipse.Triggers>
-                                            <EventTrigger RoutedEvent="FrameworkElement.Loaded">
-                                                <BeginStoryboard>
-                                                    <Storyboard RepeatBehavior="Forever">
-                                                        <DoubleAnimation
+                                            <Ellipse.RenderTransform>
+                                                <RotateTransform x:Name="QuickActionSpinnerRotate" Angle="0" />
+                                            </Ellipse.RenderTransform>
+                                            <Ellipse.Triggers>
+                                                <EventTrigger RoutedEvent="FrameworkElement.Loaded">
+                                                    <BeginStoryboard>
+                                                        <Storyboard RepeatBehavior="Forever">
+                                                            <DoubleAnimation
                                                             Storyboard.TargetName="QuickActionSpinnerRotate"
                                                             Storyboard.TargetProperty="Angle"
                                                             From="0" To="360" Duration="0:0:1" />
-                                                    </Storyboard>
-                                                </BeginStoryboard>
-                                            </EventTrigger>
-                                        </Ellipse.Triggers>
-                                    </Ellipse>
-                                </Grid>
+                                                        </Storyboard>
+                                                    </BeginStoryboard>
+                                                </EventTrigger>
+                                            </Ellipse.Triggers>
+                                        </Ellipse>
+                                    </Grid>
 
-                                <Button Command="{Binding DataContext.QuickInstallCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                    <Button Command="{Binding DataContext.QuickInstallCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
                                         CommandParameter="{Binding}"
                                         ToolTip="Install latest version"
                                         AutomationProperties.Name="{Binding InstallButtonAccessibleName}">
-                                    <Button.Style>
-                                        <Style TargetType="Button" BasedOn="{StaticResource IconButtonStyle}">
-                                            <Setter Property="Visibility" Value="Collapsed" />
-                                            <Style.Triggers>
-                                                <MultiDataTrigger>
-                                                    <MultiDataTrigger.Conditions>
-                                                        <Condition Binding="{Binding CanQuickInstall}" Value="True" />
-                                                        <Condition Binding="{Binding IsOperationInProgress}" Value="False" />
-                                                    </MultiDataTrigger.Conditions>
-                                                    <Setter Property="Visibility" Value="Visible" />
-                                                </MultiDataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </Button.Style>
-                                    <imaging:CrispImage Width="16" Height="16"
+                                        <Button.Style>
+                                            <Style TargetType="Button" BasedOn="{StaticResource IconButtonStyle}">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                <Style.Triggers>
+                                                    <MultiDataTrigger>
+                                                        <MultiDataTrigger.Conditions>
+                                                            <Condition Binding="{Binding CanQuickInstall}" Value="True" />
+                                                            <Condition Binding="{Binding IsOperationInProgress}" Value="False" />
+                                                        </MultiDataTrigger.Conditions>
+                                                        <Setter Property="Visibility" Value="Visible" />
+                                                    </MultiDataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Button.Style>
+                                        <imaging:CrispImage Width="16" Height="16"
                                                         Moniker="{x:Static catalog:KnownMonikers.CloudDownload}" />
-                                </Button>
-                                <Button Command="{Binding DataContext.QuickUninstallCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                    </Button>
+                                    <Button Command="{Binding DataContext.QuickUninstallCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
                                         CommandParameter="{Binding}"
                                         ToolTip="Uninstall package"
                                         AutomationProperties.Name="{Binding UninstallButtonAccessibleName}">
-                                    <Button.Style>
-                                        <Style TargetType="Button" BasedOn="{StaticResource IconButtonStyle}">
-                                            <Setter Property="Visibility" Value="Collapsed" />
-                                            <Style.Triggers>
-                                                <MultiDataTrigger>
-                                                    <MultiDataTrigger.Conditions>
-                                                        <Condition Binding="{Binding CanQuickUninstall}" Value="True" />
-                                                        <Condition Binding="{Binding IsOperationInProgress}" Value="False" />
-                                                    </MultiDataTrigger.Conditions>
-                                                    <Setter Property="Visibility" Value="Visible" />
-                                                </MultiDataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </Button.Style>
-                                    <imaging:CrispImage Width="16" Height="16"
+                                        <Button.Style>
+                                            <Style TargetType="Button" BasedOn="{StaticResource IconButtonStyle}">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                <Style.Triggers>
+                                                    <MultiDataTrigger>
+                                                        <MultiDataTrigger.Conditions>
+                                                            <Condition Binding="{Binding CanQuickUninstall}" Value="True" />
+                                                            <Condition Binding="{Binding IsOperationInProgress}" Value="False" />
+                                                        </MultiDataTrigger.Conditions>
+                                                        <Setter Property="Visibility" Value="Visible" />
+                                                    </MultiDataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Button.Style>
+                                        <imaging:CrispImage Width="16" Height="16"
                                                         Moniker="{x:Static catalog:KnownMonikers.Remove}" />
-                                </Button>
+                                    </Button>
                                 </StackPanel>
                             </StackPanel>
                         </Grid>
@@ -659,137 +667,137 @@
 
                     <!-- Single-package detail: shown when exactly one row is selected. -->
                     <StackPanel Visibility="{Binding HasSelectedPackage, Converter={StaticResource BoolToVis}}">
-                    <!-- Package title + version dropdown + install button -->
-                    <Grid Margin="0,0,0,6">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0"
+                        <!-- Package title + version dropdown + install button -->
+                        <Grid Margin="0,0,0,6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0"
                                    Text="{Binding Detail.PackageId}"
                                    FontSize="15" FontWeight="Bold"
                                    VerticalAlignment="Center"
                                    TextTrimming="CharacterEllipsis" />
-                        <ComboBox Grid.Column="1"
+                            <ComboBox Grid.Column="1"
                                   ItemsSource="{Binding Detail.AvailableVersions}"
                                   SelectedItem="{Binding Detail.SelectedVersionItem}"
                                   MinWidth="100" Margin="8,0,0,0"
                                   VerticalAlignment="Center"
                                   AutomationProperties.Name="Package version">
-                            <ComboBox.ItemTemplate>
-                                <DataTemplate>
-                                    <!-- The drop-down items render with this template; the
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <!-- The drop-down items render with this template; the
                                          selection box itself uses ToString() and shows the
                                          plain version, so the highlight only appears in the
                                          open list (which is what we want). -->
-                                    <TextBlock Text="{Binding DisplayText}">
-                                        <TextBlock.Style>
-                                            <Style TargetType="TextBlock">
-                                                <Style.Triggers>
-                                                    <!-- Bold the installed version, but only while
+                                        <TextBlock Text="{Binding DisplayText}">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Style.Triggers>
+                                                        <!-- Bold the installed version, but only while
                                                          the dropdown is expanded - inside the closed
                                                          selection box there's no ComboBoxItem ancestor,
                                                          so this trigger doesn't fire and the collapsed
                                                          text stays at the default weight. -->
-                                                    <MultiDataTrigger>
-                                                        <MultiDataTrigger.Conditions>
-                                                            <Condition Binding="{Binding IsInstalled}" Value="True" />
-                                                            <Condition Binding="{Binding RelativeSource={RelativeSource AncestorType=ComboBoxItem}, Path=IsVisible, FallbackValue=False}" Value="True" />
-                                                        </MultiDataTrigger.Conditions>
-                                                        <Setter Property="FontWeight" Value="Bold" />
-                                                    </MultiDataTrigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </TextBlock.Style>
-                                    </TextBlock>
-                                </DataTemplate>
-                            </ComboBox.ItemTemplate>
-                        </ComboBox>
-                        <Button Grid.Column="2"
+                                                        <MultiDataTrigger>
+                                                            <MultiDataTrigger.Conditions>
+                                                                <Condition Binding="{Binding IsInstalled}" Value="True" />
+                                                                <Condition Binding="{Binding RelativeSource={RelativeSource AncestorType=ComboBoxItem}, Path=IsVisible, FallbackValue=False}" Value="True" />
+                                                            </MultiDataTrigger.Conditions>
+                                                            <Setter Property="FontWeight" Value="Bold" />
+                                                        </MultiDataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
+                            <Button Grid.Column="2"
                                 Command="{Binding Detail.InstallCommand}"
                                 Style="{StaticResource IconButtonStyle}"
                                 Margin="4,0,0,0"
                                 ToolTip="Install"
                                 AutomationProperties.Name="Install package"
                                 Visibility="{Binding Detail.CanInstall, Converter={StaticResource BoolToVis}}">
-                            <imaging:CrispImage Width="16" Height="16"
+                                <imaging:CrispImage Width="16" Height="16"
                                                 Moniker="{x:Static catalog:KnownMonikers.CloudDownload}" />
-                        </Button>
-                    </Grid>
+                            </Button>
+                        </Grid>
 
-                    <!-- Description -->
-                    <TextBlock Text="{Binding Detail.Description}"
+                        <!-- Description -->
+                        <TextBlock Text="{Binding Detail.Description}"
                                TextWrapping="Wrap"
                                Style="{StaticResource MutedTextStyle}"
                                LineHeight="18"
                                LineStackingStrategy="BlockLineHeight"
                                Margin="0,2,0,10" />
 
-                    <!-- Metadata row -->
-                    <WrapPanel Margin="0,0,0,6">
-                        <TextBlock Style="{StaticResource MutedTextStyle}" Margin="0,0,12,0">
+                        <!-- Metadata row -->
+                        <WrapPanel Margin="0,0,0,6">
+                            <TextBlock Style="{StaticResource MutedTextStyle}" Margin="0,0,12,0">
                             <Run Text="License: " />
                             <Hyperlink Command="{Binding Detail.OpenLicenseCommand}">
                                 <Run Text="{Binding Detail.License}" />
                             </Hyperlink>
-                        </TextBlock>
-                        <TextBlock Style="{StaticResource MutedTextStyle}" Margin="0,0,12,0">
+                            </TextBlock>
+                            <TextBlock Style="{StaticResource MutedTextStyle}" Margin="0,0,12,0">
                             <Run Text="Downloads: " /><Run Text="{Binding Detail.DownloadCountDisplay}" />
-                        </TextBlock>
-                        <TextBlock Style="{StaticResource MutedTextStyle}" Margin="0,0,12,0">
+                            </TextBlock>
+                            <TextBlock Style="{StaticResource MutedTextStyle}" Margin="0,0,12,0">
                             <Run Text="Authors: " /><Run Text="{Binding Detail.Authors}" />
-                        </TextBlock>
-                        <TextBlock Style="{StaticResource MutedTextStyle}" Margin="0,0,12,0"
+                            </TextBlock>
+                            <TextBlock Style="{StaticResource MutedTextStyle}" Margin="0,0,12,0"
                                    Visibility="{Binding Detail.HasPublished, Converter={StaticResource BoolToVis}}">
                             <Run Text="Last updated: " /><Run Text="{Binding Detail.PublishedDisplay}" />
-                        </TextBlock>
-                        <TextBlock Style="{StaticResource MutedTextStyle}"
+                            </TextBlock>
+                            <TextBlock Style="{StaticResource MutedTextStyle}"
                                    Visibility="{Binding Detail.HasProjectUrl, Converter={StaticResource BoolToVis}}">
                             <Hyperlink Command="{Binding Detail.OpenProjectUrlCommand}"
                                        ToolTip="{Binding Detail.ProjectUrl}">
                                 <Run Text="Project website" />
                             </Hyperlink>
-                        </TextBlock>
-                    </WrapPanel>
+                            </TextBlock>
+                        </WrapPanel>
 
-                    <!-- Action buttons (Update All Projects). Install is moved
+                        <!-- Action buttons (Update All Projects). Install is moved
                          up next to the version dropdown; Update and Uninstall
                          are intentionally omitted from the detail pane (the
                          row's inline Update / Uninstall icon buttons are the
                          canonical entry points). -->
-                    <WrapPanel Margin="0,0,0,6">
-                        <Button Content="Update All Projects"
+                        <WrapPanel Margin="0,0,0,6">
+                            <Button Content="Update All Projects"
                                 Command="{Binding Detail.UpdateAllProjectsCommand}"
                                 Padding="10,4" Margin="0,0,4,0"
                                 Visibility="{Binding Detail.CanUpdateAllProjects, Converter={StaticResource BoolToVis}}"
                                 AutomationProperties.Name="Update package in all projects" />
-                    </WrapPanel>
+                        </WrapPanel>
 
-                    <!-- Dependency tree (grouped by target framework) -->
-                    <Expander Header="Dependencies" IsExpanded="False">
-                        <ItemsControl ItemsSource="{Binding Detail.DependencyGroups}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <StackPanel Margin="0,2,0,4">
-                                        <TextBlock Text="{Binding Header}"
+                        <!-- Dependency tree (grouped by target framework) -->
+                        <Expander Header="Dependencies" IsExpanded="False">
+                            <ItemsControl ItemsSource="{Binding Detail.DependencyGroups}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Margin="0,2,0,4">
+                                            <TextBlock Text="{Binding Header}"
                                                    FontWeight="SemiBold"
                                                    FontSize="11"
                                                    Margin="0,0,0,2" />
-                                        <ItemsControl ItemsSource="{Binding Items}" Margin="12,0,0,0">
-                                            <ItemsControl.ItemTemplate>
-                                                <DataTemplate>
-                                                    <TextBlock Text="{Binding NameAndVersion}"
+                                            <ItemsControl ItemsSource="{Binding Items}" Margin="12,0,0,0">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <TextBlock Text="{Binding NameAndVersion}"
                                                                Style="{StaticResource MutedTextStyle}"
                                                                Margin="0,1" />
-                                                </DataTemplate>
-                                            </ItemsControl.ItemTemplate>
-                                        </ItemsControl>
-                                    </StackPanel>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </Expander>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </Expander>
                     </StackPanel>
                 </Grid>
             </ScrollViewer>

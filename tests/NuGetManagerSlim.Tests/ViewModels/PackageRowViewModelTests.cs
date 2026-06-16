@@ -371,5 +371,54 @@ namespace NuGetManagerSlim.Tests.ViewModels
             var vm = MakeRow();
             Assert.Contains("TestPkg", vm.UninstallButtonAccessibleName);
         }
+
+        [Fact]
+        public void VersionInformation_NoInstalled_ReturnsPrereleaseVersion()
+        {
+            var vm = new PackageRowViewModel(new PackageModel
+            {
+                PackageId = "Pkg",
+                LatestPrereleaseVersion = NuGetVersion.Parse("1.0.0"),
+            });
+            Assert.Equal("v1.0.0", vm.VersionInformation);
+        }
+
+        [Fact]
+        public void VersionInformation_NoInstalled_ReturnsLatestVersion()
+        {
+            var vm = new PackageRowViewModel(new PackageModel
+            {
+                PackageId = "Pkg",
+                LatestStableVersion = NuGetVersion.Parse("1.0.0"),
+            });
+            Assert.Equal("v1.0.0", vm.VersionInformation);
+        }
+
+        [Fact]
+        public void VersionInformation_InstalledNoUpdate_ReturnsInstalledVersion()
+        {
+            var vm = new PackageRowViewModel(new PackageModel
+            {
+                PackageId = "Pkg",
+                InstalledVersion = NuGetVersion.Parse("1.0.0"),
+                LatestStableVersion = NuGetVersion.Parse("1.0.0"),
+            });
+            Assert.True(vm.IsInstalled);
+            Assert.Equal("v1.0.0", vm.VersionInformation);
+        }
+
+        [Fact]
+        public void VersionInformation_InstalledHasUpdate_ReturnsInstalledVersionAndNewVersion()
+        {
+            var vm = new PackageRowViewModel(new PackageModel
+            {
+                PackageId = "Pkg",
+                InstalledVersion = NuGetVersion.Parse("1.0.0"),
+                LatestStableVersion = NuGetVersion.Parse("2.0.0"),
+            });
+            Assert.True(vm.IsInstalled);
+            Assert.True(vm.HasUpdate);
+            Assert.Equal("v1.0.0 → v2.0.0", vm.VersionInformation);
+        }
     }
 }

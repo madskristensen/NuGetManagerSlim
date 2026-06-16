@@ -12,7 +12,7 @@ namespace NuGetManagerSlim
         public const string Name = "NuGet Manager Slim";
         public const string Description = @"An alternative NuGet Package Manager for Visual Studio — unified, async-first, with inline progress and per-framework version state.";
         public const string Language = "en-US";
-        public const string Version = "1.0";
+        public const string Version = "1.1";
         public const string Author = "Mads Kristensen";
         public const string Tags = "nuget, package manager, packages";
         public const bool IsPreview = false;
