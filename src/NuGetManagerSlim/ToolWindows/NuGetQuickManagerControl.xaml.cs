@@ -1,3 +1,4 @@
+using System;
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
@@ -131,7 +132,7 @@ namespace NuGetManagerSlim.ToolWindows
             return null;
         }
 
-        private void PackageListBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        private void PackageListBox_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
         {
             if (PackageListBox.SelectedItem != null)
                 PackageListBox.ScrollIntoView(PackageListBox.SelectedItem);
@@ -145,6 +146,22 @@ namespace NuGetManagerSlim.ToolWindows
                 if (item is PackageRowViewModel row) rows.Add(row);
             }
             _viewModel.SetSelectedPackages(rows);
+        }
+
+        private void Advisory_RequestNavigate(object sender, System.Windows.Navigation.RequestNavigateEventArgs e)
+        {
+            try
+            {
+                if (e.Uri != null && !string.IsNullOrEmpty(e.Uri.AbsoluteUri))
+                {
+                    System.Diagnostics.Process.Start(e.Uri.AbsoluteUri);
+                }
+            }
+            catch (System.Exception ex)
+            {
+                _ = ex.LogAsync();
+            }
+            e.Handled = true;
         }
 
         private void PackageIcon_ImageFailed(object sender, ExceptionRoutedEventArgs e)

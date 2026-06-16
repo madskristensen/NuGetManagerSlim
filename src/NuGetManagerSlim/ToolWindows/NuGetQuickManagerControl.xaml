@@ -418,6 +418,12 @@
                                            Style="{StaticResource MutedTextStyle}" />
                                 <TextBlock Text="{Binding AuthorDisplay}"
                                            Style="{StaticResource MutedTextStyle}" Margin="6,0,0,0" />
+                                <TextBlock Text="{Binding VulnerabilityBadge}"
+                                           FontSize="10" FontWeight="SemiBold"
+                                           VerticalAlignment="Center" Margin="6,0,0,0"
+                                           Foreground="#D13438"
+                                           ToolTip="{Binding VulnerabilityTooltip}"
+                                           Visibility="{Binding HasVulnerabilities, Converter={StaticResource BoolToVis}}" />
                             </StackPanel>
 
                             <!-- Quick action area. The update button is always visible when an
@@ -733,6 +739,39 @@
                                LineHeight="18"
                                LineStackingStrategy="BlockLineHeight"
                                Margin="0,2,0,10" />
+
+                        <!-- Security vulnerabilities for the selected version -->
+                        <Border Margin="0,0,0,10" Padding="8,6"
+                                CornerRadius="3"
+                                Background="#1FD13438"
+                                BorderBrush="#D13438" BorderThickness="1"
+                                Visibility="{Binding Detail.HasVulnerabilities, Converter={StaticResource BoolToVis}}">
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                    <imaging:CrispImage Width="14" Height="14"
+                                                        Moniker="{x:Static catalog:KnownMonikers.StatusSecurityWarning}"
+                                                        VerticalAlignment="Center" />
+                                    <TextBlock Text="Known vulnerabilities"
+                                               FontWeight="Bold" FontSize="11"
+                                               Margin="6,0,0,0" VerticalAlignment="Center"
+                                               Foreground="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowTextKey}}" />
+                                </StackPanel>
+                                <ItemsControl ItemsSource="{Binding Detail.Vulnerabilities}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Margin="0,1" FontSize="11">
+                                                <Run Text="{Binding SeverityText, Mode=OneWay}" FontWeight="SemiBold" />
+                                                <Run Text=" severity" />
+                                                <Hyperlink NavigateUri="{Binding AdvisoryUrl}"
+                                                           RequestNavigate="Advisory_RequestNavigate">
+                                                    <Run Text="View advisory" />
+                                                </Hyperlink>
+                                            </TextBlock>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Border>
 
                         <!-- Metadata row -->
                         <WrapPanel Margin="0,0,0,6">

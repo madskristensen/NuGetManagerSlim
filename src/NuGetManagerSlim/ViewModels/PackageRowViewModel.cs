@@ -10,6 +10,7 @@ namespace NuGetManagerSlim.ViewModels
     {
         private PackageModel _model;
         private string? _iconUrlOverride;
+        private System.Collections.Generic.IReadOnlyList<PackageVulnerabilityInfo>? _vulnerabilitiesOverride;
 
         [ObservableProperty]
         private bool _isOperationInProgress;
@@ -173,6 +174,65 @@ namespace NuGetManagerSlim.ViewModels
         public string RequiredByDisplay => _model.IsTransitive && !string.IsNullOrEmpty(_model.RequiredByPackageId)
             ? $"required by: {_model.RequiredByPackageId}"
             : string.Empty;
+
+        // Vulnerability metadata is fetched lazily for the installed version, so
+        // it may arrive after the row is created. ApplyVulnerabilities overrides
+        // whatever the model carried.
+        public System.Collections.Generic.IReadOnlyList<PackageVulnerabilityInfo> Vulnerabilities
+            => _vulnerabilitiesOverride ?? _model.Vulnerabilities;
+
+        public bool HasVulnerabilities => Vulnerabilities.Count > 0;
+
+        private int MaxSeverity
+        {
+            get
+            {
+                var max = -1;
+                foreach (var v in Vulnerabilities)
+                {
+                    if (v.Severity > max) max = v.Severity;
+                }
+                return max;
+            }
+        }
+
+        public string VulnerabilityBadge
+        {
+            get
+            {
+                if (!HasVulnerabilities) return string.Empty;
+                var severity = MaxSeverity switch
+                {
+                    0 => "Low",
+                    1 => "Moderate",
+                    2 => "High",
+                    3 => "Critical",
+                    _ => "Unknown",
+                };
+                var count = Vulnerabilities.Count;
+                return count == 1
+                    ? $"\u26A0 {severity} vulnerability"
+                    : $"\u26A0 {severity} vulnerability ({count})";
+            }
+        }
+
+        public string VulnerabilityTooltip
+        {
+            get
+            {
+                if (!HasVulnerabilities) return string.Empty;
+                return string.Join("\n", System.Linq.Enumerable.Select(Vulnerabilities, v => v.DisplayText));
+            }
+        }
+
+        public void ApplyVulnerabilities(System.Collections.Generic.IReadOnlyList<PackageVulnerabilityInfo> vulnerabilities)
+        {
+            _vulnerabilitiesOverride = vulnerabilities ?? [];
+            OnPropertyChanged(nameof(Vulnerabilities));
+            OnPropertyChanged(nameof(HasVulnerabilities));
+            OnPropertyChanged(nameof(VulnerabilityBadge));
+            OnPropertyChanged(nameof(VulnerabilityTooltip));
+        }
 
         public string UpdateButtonAccessibleName => $"Update {PackageId} to {LatestStableVersion}";
 

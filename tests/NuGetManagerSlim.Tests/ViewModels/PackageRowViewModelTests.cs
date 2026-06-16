@@ -359,6 +359,69 @@ namespace NuGetManagerSlim.Tests.ViewModels
         }
 
         [Fact]
+        public void HasVulnerabilities_WhenNoneOnModel_ReturnsFalse()
+        {
+            var vm = MakeRow(installed: "1.0.0");
+            Assert.False(vm.HasVulnerabilities);
+            Assert.Equal(string.Empty, vm.VulnerabilityBadge);
+        }
+
+        [Fact]
+        public void HasVulnerabilities_WhenModelCarriesAdvisory_ReturnsTrue()
+        {
+            var vm = new PackageRowViewModel(new PackageModel
+            {
+                PackageId = "Pkg",
+                InstalledVersion = NuGetVersion.Parse("1.0.0"),
+                Vulnerabilities = new[]
+                {
+                    new PackageVulnerabilityInfo { Severity = 2, AdvisoryUrl = "https://example.com/a" },
+                },
+            });
+            Assert.True(vm.HasVulnerabilities);
+            Assert.Contains("High", vm.VulnerabilityBadge);
+        }
+
+        [Fact]
+        public void ApplyVulnerabilities_PromotesRowToVulnerableAndPicksMaxSeverity()
+        {
+            var vm = MakeRow(installed: "1.0.0");
+            Assert.False(vm.HasVulnerabilities);
+
+            vm.ApplyVulnerabilities(new[]
+            {
+                new PackageVulnerabilityInfo { Severity = 1, AdvisoryUrl = "https://example.com/a" },
+                new PackageVulnerabilityInfo { Severity = 3, AdvisoryUrl = "https://example.com/b" },
+            });
+
+            Assert.True(vm.HasVulnerabilities);
+            Assert.Equal(2, vm.Vulnerabilities.Count);
+            // Badge reflects the highest severity (Critical) and the advisory count.
+            Assert.Contains("Critical", vm.VulnerabilityBadge);
+            Assert.Contains("(2)", vm.VulnerabilityBadge);
+        }
+
+        [Fact]
+        public void ApplyVulnerabilities_WithEmptyList_ClearsVulnerableState()
+        {
+            var vm = new PackageRowViewModel(new PackageModel
+            {
+                PackageId = "Pkg",
+                InstalledVersion = NuGetVersion.Parse("1.0.0"),
+                Vulnerabilities = new[]
+                {
+                    new PackageVulnerabilityInfo { Severity = 2, AdvisoryUrl = "https://example.com/a" },
+                },
+            });
+            Assert.True(vm.HasVulnerabilities);
+
+            vm.ApplyVulnerabilities(System.Array.Empty<PackageVulnerabilityInfo>());
+
+            Assert.False(vm.HasVulnerabilities);
+            Assert.Equal(string.Empty, vm.VulnerabilityBadge);
+        }
+
+        [Fact]
         public void InstallButtonAccessibleName_ContainsPackageId()
         {
             var vm = MakeRow();

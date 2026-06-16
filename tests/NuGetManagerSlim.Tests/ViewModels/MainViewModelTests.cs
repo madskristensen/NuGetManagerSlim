@@ -171,6 +171,29 @@ namespace NuGetManagerSlim.Tests.ViewModels
         }
 
         [Fact]
+        public void ViewMode_SetToVulnerable_FlipsInstalledAndVulnerableFilters()
+        {
+            var (vm, _, _, _) = CreateViewModel();
+            vm.ViewMode = PackageViewMode.Vulnerable;
+            Assert.True(vm.FilterInstalled);
+            Assert.True(vm.FilterVulnerable);
+            Assert.False(vm.FilterUpdates);
+            Assert.Equal(PackageViewMode.Vulnerable, vm.ViewMode);
+        }
+
+        [Fact]
+        public void ViewMode_SetFromVulnerableToBrowse_ClearsFilters()
+        {
+            var (vm, _, _, _) = CreateViewModel();
+            vm.ViewMode = PackageViewMode.Vulnerable;
+            vm.ViewMode = PackageViewMode.Browse;
+            Assert.False(vm.FilterInstalled);
+            Assert.False(vm.FilterVulnerable);
+            Assert.False(vm.FilterUpdates);
+            Assert.Equal(PackageViewMode.Browse, vm.ViewMode);
+        }
+
+        [Fact]
         public void ExtractSourceFilter_NoToken_ReturnsNullSources()
         {
             var (clean, sources) = MainViewModel.ExtractSourceFilter("newtonsoft");

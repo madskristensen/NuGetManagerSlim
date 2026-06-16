@@ -25,6 +25,13 @@ namespace NuGetManagerSlim.Models
         public IReadOnlyList<FrameworkVersionInfo> PerFrameworkVersions { get; init; } = [];
         public IReadOnlyList<PackageDependencyInfo> Dependencies { get; init; } = [];
 
+        // Known security advisories that affect this package version. Populated
+        // from the feed's registration metadata. Empty when the package is not
+        // known to be vulnerable.
+        public IReadOnlyList<PackageVulnerabilityInfo> Vulnerabilities { get; init; } = [];
+
+        public bool HasVulnerabilities => Vulnerabilities.Count > 0;
+
         // Version range constraint declared in the project file (e.g. allowedVersions
         // in packages.config, or a range-syntax Version in PackageReference).
         // When set, only updates that satisfy this range should be offered.
@@ -50,8 +57,30 @@ namespace NuGetManagerSlim.Models
             Published = Published,
             PerFrameworkVersions = PerFrameworkVersions,
             Dependencies = Dependencies,
+            Vulnerabilities = Vulnerabilities,
             AllowedVersionRange = range,
         };
+    }
+
+    public class PackageVulnerabilityInfo
+    {
+        // Severity ordinal as reported by the feed: 0 = Low, 1 = Moderate,
+        // 2 = High, 3 = Critical.
+        public int Severity { get; init; }
+        public string? AdvisoryUrl { get; init; }
+
+        public string SeverityText => Severity switch
+        {
+            0 => "Low",
+            1 => "Moderate",
+            2 => "High",
+            3 => "Critical",
+            _ => "Unknown",
+        };
+
+        public string DisplayText => string.IsNullOrEmpty(AdvisoryUrl)
+            ? $"{SeverityText} severity"
+            : $"{SeverityText} severity - {AdvisoryUrl}";
     }
 
     public class PackageDependencyInfo

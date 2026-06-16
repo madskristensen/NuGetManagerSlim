@@ -20,6 +20,7 @@ namespace NuGetManagerSlim.ViewModels
         Browse,
         Installed,
         Updates,
+        Vulnerable,
     }
 
     public sealed partial class MainViewModel : ObservableObject, IDisposable
@@ -76,6 +77,7 @@ namespace NuGetManagerSlim.ViewModels
         [ObservableProperty] private ProjectScopeModel? _currentProject;
         [ObservableProperty] private bool _filterInstalled;
         [ObservableProperty] private bool _filterUpdates;
+        [ObservableProperty] private bool _filterVulnerable;
         [ObservableProperty] private bool _filterPrerelease;
         [ObservableProperty] private bool _isLoading;
         [ObservableProperty] private bool _isRemoteLoading;
@@ -105,6 +107,7 @@ namespace NuGetManagerSlim.ViewModels
         {
             get
             {
+                if (FilterVulnerable) return PackageViewMode.Vulnerable;
                 if (FilterUpdates) return PackageViewMode.Updates;
                 if (FilterInstalled) return PackageViewMode.Installed;
                 return PackageViewMode.Browse;
@@ -114,8 +117,11 @@ namespace NuGetManagerSlim.ViewModels
                 _suppressFilterReload = true;
                 try
                 {
+                    FilterVulnerable = value == PackageViewMode.Vulnerable;
                     FilterUpdates = value == PackageViewMode.Updates;
-                    FilterInstalled = value == PackageViewMode.Installed || value == PackageViewMode.Updates;
+                    FilterInstalled = value == PackageViewMode.Installed
+                        || value == PackageViewMode.Updates
+                        || value == PackageViewMode.Vulnerable;
                 }
                 finally
                 {
@@ -404,6 +410,12 @@ namespace NuGetManagerSlim.ViewModels
             if (_suppressFilterReload) return;
             _ = ReloadPackagesAsync();
         }
+        partial void OnFilterVulnerableChanged(bool value)
+        {
+            OnPropertyChanged(nameof(ViewMode));
+            if (_suppressFilterReload) return;
+            _ = ReloadPackagesAsync();
+        }
         partial void OnFilterPrereleaseChanged(bool value) => _ = ReloadPackagesAsync();
 
         partial void OnIsRemoteLoadingChanged(bool value)
@@ -609,11 +621,48 @@ namespace NuGetManagerSlim.ViewModels
                 var installed = await _projectService.GetInstalledPackagesAsync(CurrentProject, cancellationToken);
                 var rows = installed.Select(p => new PackageRowViewModel(p)).ToList();
 
+                string? searchQuery = null;
                 if (!string.IsNullOrWhiteSpace(SearchText))
                 {
                     var (cleanQuery, _) = ExtractSourceFilter(SearchText);
+                    searchQuery = cleanQuery;
                     if (!string.IsNullOrWhiteSpace(cleanQuery))
                         rows = rows.Where(r => r.PackageId.Contains(cleanQuery, StringComparison.OrdinalIgnoreCase)).ToList();
+                }
+
+                if (FilterVulnerable)
+                {
+                    // Vulnerabilities frequently hide in transitive dependencies,
+                    // so scan those too (mirrors the stock manager's behavior).
+                    IReadOnlyList<PackageModel> transitive;
+                    try
+                    {
+                        transitive = await _projectService.GetTransitivePackagesAsync(CurrentProject, cancellationToken).ConfigureAwait(true);
+                    }
+                    catch (OperationCanceledException) { throw; }
+                    catch (Exception ex)
+                    {
+                        await ex.LogAsync();
+                        transitive = [];
+                    }
+
+                    var seen = new HashSet<string>(rows.Select(r => r.PackageId), StringComparer.OrdinalIgnoreCase);
+                    foreach (var pkg in transitive)
+                    {
+                        if (!string.IsNullOrWhiteSpace(searchQuery)
+                            && pkg.PackageId.IndexOf(searchQuery, StringComparison.OrdinalIgnoreCase) < 0)
+                            continue;
+                        if (seen.Add(pkg.PackageId))
+                            rows.Add(new PackageRowViewModel(pkg));
+                    }
+
+                    await EnrichVulnerabilitiesAsync(rows, cancellationToken).ConfigureAwait(true);
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    rows = rows.Where(r => r.HasVulnerabilities).ToList();
+                    _packages.ReplaceAll(rows.OrderBy(r => r.IsTransitive).ThenBy(r => r.PackageId));
+                    SeedMruFromInstalled(installed);
+                    return;
                 }
 
                 if (FilterUpdates)
@@ -702,6 +751,34 @@ namespace NuGetManagerSlim.ViewModels
                     var meta = await _feedService.GetPackageMetadataAsync(row.PackageId, ct).ConfigureAwait(false);
                     if (meta == null || ct.IsCancellationRequested) return;
                     row.ApplyMetadata(meta);
+                }
+                catch (OperationCanceledException) { }
+                catch (Exception ex) { await ex.LogAsync(); }
+                finally { s_enrichmentThrottle.Release(); }
+            });
+            try { await Task.WhenAll(tasks).ConfigureAwait(false); }
+            catch (OperationCanceledException) { }
+        }
+
+        // Resolves each installed package's vulnerability advisories for its
+        // installed version. Used by the Vulnerable view, which must know the
+        // advisory state of the *installed* version (not the latest) before it
+        // can decide whether to keep the row.
+        private async Task EnrichVulnerabilitiesAsync(IReadOnlyList<PackageRowViewModel> rows, CancellationToken ct)
+        {
+            if (rows == null || rows.Count == 0) return;
+            await TaskScheduler.Default;
+            var tasks = rows.Select(async row =>
+            {
+                if (ct.IsCancellationRequested) return;
+                var version = row.InstalledVersion;
+                if (version == null) return;
+                await s_enrichmentThrottle.WaitAsync(ct).ConfigureAwait(false);
+                try
+                {
+                    var meta = await _feedService.GetPackageMetadataAsync(row.PackageId, version, ct).ConfigureAwait(false);
+                    if (meta == null || ct.IsCancellationRequested) return;
+                    row.ApplyVulnerabilities(meta.Vulnerabilities);
                 }
                 catch (OperationCanceledException) { }
                 catch (Exception ex) { await ex.LogAsync(); }
@@ -1351,6 +1428,11 @@ namespace NuGetManagerSlim.ViewModels
             if (!FilterInstalled && !FilterUpdates && string.IsNullOrWhiteSpace(SearchText))
             {
                 EmptyStateMessage = "Search for a package to get started, or toggle Installed to see what's in your project.";
+                return;
+            }
+            if (FilterVulnerable && Packages.Count == 0)
+            {
+                EmptyStateMessage = $"No known vulnerabilities in {CurrentProject.DisplayName}. \u2713";
                 return;
             }
             if (FilterUpdates && Packages.Count == 0)

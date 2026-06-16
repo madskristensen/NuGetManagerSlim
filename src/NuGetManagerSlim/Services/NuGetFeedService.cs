@@ -658,6 +658,7 @@ namespace NuGetManagerSlim.Services
                     IconUrl = latest.IconUrl?.ToString(),
                     Published = latest.Published,
                     Dependencies = deps,
+                    Vulnerabilities = MapVulnerabilities(latest),
                 };
             }
             catch (OperationCanceledException)
@@ -675,6 +676,26 @@ namespace NuGetManagerSlim.Services
         {
             if (string.IsNullOrEmpty(source.Source)) return false;
             return source.Source.IndexOf("nuget.org", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        // Projects the feed's per-version vulnerability advisories onto our model.
+        // Returns an empty list when the version carries no known advisories.
+        private static IReadOnlyList<PackageVulnerabilityInfo> MapVulnerabilities(IPackageSearchMetadata metadata)
+        {
+            var vulnerabilities = metadata.Vulnerabilities;
+            if (vulnerabilities == null) return [];
+
+            var list = new List<PackageVulnerabilityInfo>();
+            foreach (var v in vulnerabilities)
+            {
+                if (v == null) continue;
+                list.Add(new PackageVulnerabilityInfo
+                {
+                    Severity = v.Severity,
+                    AdvisoryUrl = v.AdvisoryUrl?.ToString(),
+                });
+            }
+            return list;
         }
 
         public async Task<PackageModel?> GetPackageMetadataAsync(
@@ -802,6 +823,7 @@ namespace NuGetManagerSlim.Services
                     ProjectUrl = meta.ProjectUrl?.ToString(),
                     IconUrl = meta.IconUrl?.ToString(),
                     Dependencies = deps,
+                    Vulnerabilities = MapVulnerabilities(meta),
                 };
             }
             catch (OperationCanceledException) { throw; }

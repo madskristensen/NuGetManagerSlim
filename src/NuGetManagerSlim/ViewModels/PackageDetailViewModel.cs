@@ -37,6 +37,7 @@ namespace NuGetManagerSlim.ViewModels
         [ObservableProperty] private string _publishedDisplay = string.Empty;
         [ObservableProperty] private bool _hasProjectUrl;
         [ObservableProperty] private bool _hasPublished;
+        [ObservableProperty] private bool _hasVulnerabilities;
         [ObservableProperty] private NuGetVersion? _selectedVersion;
         [ObservableProperty] private VersionListItem? _selectedVersionItem;
         [ObservableProperty] private bool _canInstall;
@@ -51,6 +52,8 @@ namespace NuGetManagerSlim.ViewModels
         private readonly BulkObservableCollection<PackageDependencyInfo> _dependencies = [];
         public ObservableCollection<DependencyGroupViewModel> DependencyGroups => _dependencyGroups;
         private readonly BulkObservableCollection<DependencyGroupViewModel> _dependencyGroups = [];
+        public ObservableCollection<PackageVulnerabilityInfo> Vulnerabilities => _vulnerabilities;
+        private readonly BulkObservableCollection<PackageVulnerabilityInfo> _vulnerabilities = [];
 
         private CancellationTokenSource? _versionMetadataCts;
         private bool _suppressVersionReload;
@@ -77,6 +80,8 @@ namespace NuGetManagerSlim.ViewModels
             _availableVersions.ReplaceAll(System.Array.Empty<VersionListItem>());
             _dependencies.ReplaceAll(System.Array.Empty<PackageDependencyInfo>());
             _dependencyGroups.ReplaceAll(System.Array.Empty<DependencyGroupViewModel>());
+            _vulnerabilities.ReplaceAll(System.Array.Empty<PackageVulnerabilityInfo>());
+            HasVulnerabilities = false;
             ProjectMemberships.Clear();
 
             // Load versions
@@ -173,6 +178,9 @@ namespace NuGetManagerSlim.ViewModels
                     })
                     .ToList();
                 _dependencyGroups.ReplaceAll(grouped);
+
+                _vulnerabilities.ReplaceAll(metadata.Vulnerabilities);
+                HasVulnerabilities = metadata.Vulnerabilities.Count > 0;
             }
             catch (OperationCanceledException) { }
             catch (Exception ex)

@@ -73,6 +73,16 @@
         </Strings>
       </Button>
 
+      <Button guid="NuGetManagerSlim" id="ViewModeVulnerableCommand" priority="0x0400" type="Button">
+        <Parent guid="NuGetManagerSlim" id="ViewModeMenuGroup" />
+        <Icon guid="ImageCatalogGuid" id="StatusSecurityWarning" />
+        <CommandFlag>IconIsMoniker</CommandFlag>
+        <Strings>
+          <ButtonText>Vulnerable</ButtonText>
+          <ToolTipText>Show only installed packages with known security vulnerabilities</ToolTipText>
+        </Strings>
+      </Button>
+
       <Button guid="NuGetManagerSlim" id="RefreshCommand" priority="0x0100" type="Button">
         <Parent guid="NuGetManagerSlim" id="NuGetQuickManagerToolbarRefreshGroup" />
         <Icon guid="ImageCatalogGuid" id="Refresh" />
@@ -128,6 +138,7 @@
       <IDSymbol name="ViewModeBrowseCommand"                value="0x0210" />
       <IDSymbol name="ViewModeInstalledCommand"             value="0x0211" />
       <IDSymbol name="ViewModeUpdatesCommand"               value="0x0212" />
+      <IDSymbol name="ViewModeVulnerableCommand"            value="0x0213" />
       <IDSymbol name="RefreshCommand"                       value="0x0203" />
       <IDSymbol name="OpenForProjectCommand"                value="0x0204" />
 
