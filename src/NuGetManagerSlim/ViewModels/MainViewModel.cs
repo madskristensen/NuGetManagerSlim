@@ -611,7 +611,7 @@ namespace NuGetManagerSlim.ViewModels
             return (stripped, sources.Count == 0 ? null : sources);
         }
 
-        private async Task ApplyFiltersAsync(CancellationToken cancellationToken = default, bool forceRemoteUpdateFetch = false)
+        private async Task ApplyFiltersAsync(CancellationToken cancellationToken = default)
         {
             if (CurrentProject == null) return;
 
@@ -667,29 +667,25 @@ namespace NuGetManagerSlim.ViewModels
 
                 if (FilterUpdates)
                 {
-                    // HasUpdate depends on LatestStableVersion which is normally
-                    // populated asynchronously by EnrichInstalledMetadataInBackground.
-                    // Switching into the Updates view should feel instant: the
-                    // update badge is already visible on rows that have updates
-                    // (cached "latest" metadata was populated as a side effect
-                    // of prior enrichment), so we just apply any cached "latest"
-                    // metadata here and filter to rows that already report an
-                    // available update. Rows without cached metadata are simply
-                    // omitted - if the user wants to break through caching and
-                    // fetch fresh metadata for everything, they can hit the
-                    // Refresh button which invalidates the cache and reloads.
+                    // HasUpdate depends on LatestStableVersion. Apply any cached
+                    // "latest" metadata first (free), then resolve the remaining
+                    // rows from the feed. Previously the remote fetch only ran when
+                    // the user hit Refresh, so the Updates list reflected whatever
+                    // background enrichment from the Browse/Installed view happened
+                    // to finish - which made the list inconsistent and frequently
+                    // incomplete (issue #12). Always resolving the missing rows here
+                    // makes the Updates view authoritative; the feed service caches
+                    // metadata so repeat visits stay fast, and Refresh still forces
+                    // fresh data because it invalidates the cache before reloading.
                     foreach (var row in rows)
                     {
                         if (_feedService.TryGetCachedLatestMetadata(row.PackageId, out var cachedMeta) && cachedMeta != null)
                             row.ApplyMetadata(cachedMeta);
                     }
 
-                    if (forceRemoteUpdateFetch)
-                    {
-                        var rowsNeedingFetch = rows.Where(r => r.LatestStableVersion == null).ToList();
-                        if (rowsNeedingFetch.Count > 0)
-                            await EnrichRowsAsync(rowsNeedingFetch, cancellationToken).ConfigureAwait(true);
-                    }
+                    var rowsNeedingFetch = rows.Where(r => r.LatestStableVersion == null).ToList();
+                    if (rowsNeedingFetch.Count > 0)
+                        await EnrichRowsAsync(rowsNeedingFetch, cancellationToken).ConfigureAwait(true);
 
                     rows = rows.Where(r => r.HasUpdate).ToList();
                 }
@@ -1108,16 +1104,15 @@ namespace NuGetManagerSlim.ViewModels
         [RelayCommand]
         private async Task RefreshAsync()
         {
-            // User-initiated Refresh: drop cached search results so the next
-            // query goes back to the feed, then reload. In the Updates view
-            // this also forces a fresh fetch of latest metadata for every
-            // installed package so the user can break through caching.
+            // User-initiated Refresh: drop cached search results and metadata so
+            // the next query (and the Updates view's metadata fetch) goes back to
+            // the live feed, then reload.
             _feedService.InvalidateCache();
             OperationLog.Clear();
-            await ReloadPackagesAsync(forceRemoteUpdateFetch: true);
+            await ReloadPackagesAsync();
         }
 
-        public async Task ReloadPackagesAsync(bool forceRemoteUpdateFetch = false)
+        public async Task ReloadPackagesAsync()
         {
             // Re-load packages using the current scope, view-mode and search.
             try
@@ -1128,7 +1123,7 @@ namespace NuGetManagerSlim.ViewModels
                     // can't land on top of the filtered list we're about to build.
                     CancelCts(ref _searchCts);
                     var ct = ReplaceCts(ref _filterCts);
-                    await ApplyFiltersAsync(ct, forceRemoteUpdateFetch);
+                    await ApplyFiltersAsync(ct);
                 }
                 else
                 {
