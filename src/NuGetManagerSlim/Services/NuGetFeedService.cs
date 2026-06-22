@@ -482,10 +482,22 @@ namespace NuGetManagerSlim.Services
                     // version list per package (the previous N+1 latency multiplier).
                     // The detail pane's GetVersionsAsync still produces the full,
                     // accurate list when the user actually opens a package.
+                    //
+                    // A single search hit only tells us one version, so only assert
+                    // what it actually represents and leave the other slot unknown
+                    // (null) for the authoritative latest-metadata enrichment to
+                    // fill. Fabricating a prerelease equal to a stable hit - or a
+                    // stable we never saw - is exactly what made update detection
+                    // inconsistent between this path and enrichment.
                     var version = result.Identity.Version;
                     NuGet.Versioning.NuGetVersion? latestStable;
                     NuGet.Versioning.NuGetVersion? latestPre;
-                    if (version != null && version.IsPrerelease)
+                    if (version == null)
+                    {
+                        latestStable = null;
+                        latestPre = null;
+                    }
+                    else if (version.IsPrerelease)
                     {
                         latestStable = null;
                         latestPre = version;
@@ -493,7 +505,7 @@ namespace NuGetManagerSlim.Services
                     else
                     {
                         latestStable = version;
-                        latestPre = version;
+                        latestPre = null;
                     }
 
                     list.Add(new PackageModel
@@ -561,6 +573,31 @@ namespace NuGetManagerSlim.Services
         // even after connectivity is restored (issue #16).
         public static bool ShouldCacheMetadataResult(PackageModel? value, bool anySourceFaulted)
             => value != null || !anySourceFaulted;
+
+        // Single source of truth for deriving the "latest" versions from a set of
+        // candidate versions: the stable result is the highest non-prerelease
+        // version (null when none qualify) and the prerelease result is the
+        // highest version overall. Centralizing this stops the various feed paths
+        // from each re-deriving it inconsistently - several previously inspected
+        // only the single top version and reported "no stable update" whenever
+        // that top version happened to be a prerelease, which made packages whose
+        // feed lists a prerelease above the latest stable (e.g. System.Text.Json)
+        // vanish from the Updates view even though a stable update existed.
+        public static (NuGetVersion? Stable, NuGetVersion? Prerelease) SelectLatestVersions(
+            IEnumerable<NuGetVersion> versions)
+        {
+            if (versions == null) return (null, null);
+
+            NuGetVersion? stable = null;
+            NuGetVersion? prerelease = null;
+            foreach (var v in versions)
+            {
+                if (v == null) continue;
+                if (prerelease == null || v > prerelease) prerelease = v;
+                if (!v.IsPrerelease && (stable == null || v > stable)) stable = v;
+            }
+            return (stable, prerelease);
+        }
 
         private enum SourceMetadataStatus { Found, NotFound, Faulted }
 
@@ -637,8 +674,17 @@ namespace NuGetManagerSlim.Services
                     packageId, includePrerelease: true, includeUnlisted: false,
                     _cacheContext, _logger, cancellationToken).ConfigureAwait(false);
 
-                var latest = metadata.OrderByDescending(m => m.Identity.Version).FirstOrDefault();
-                if (latest == null) return SourceMetadataOutcome.NotFound;
+                var allMetadata = metadata?.ToList();
+                if (allMetadata == null || allMetadata.Count == 0) return SourceMetadataOutcome.NotFound;
+
+                // The display fields (description, authors, deps, download count)
+                // come from the newest version overall, but the latest stable /
+                // prerelease slots are derived from the full version list so a
+                // prerelease sitting above the latest stable no longer hides the
+                // stable update.
+                var latest = allMetadata.OrderByDescending(m => m.Identity.Version).First();
+                var (latestStable, latestPrerelease) = SelectLatestVersions(
+                    allMetadata.Select(m => m.Identity.Version));
 
                 var deps = latest.DependencySets
                     .SelectMany(ds => ds.Packages.Select(p => new PackageDependencyInfo
@@ -677,8 +723,8 @@ namespace NuGetManagerSlim.Services
                 return SourceMetadataOutcome.Hit(new PackageModel
                 {
                     PackageId = latest.Identity.Id,
-                    LatestStableVersion = latest.Identity.Version.IsPrerelease ? null : latest.Identity.Version,
-                    LatestPrereleaseVersion = latest.Identity.Version,
+                    LatestStableVersion = latestStable,
+                    LatestPrereleaseVersion = latestPrerelease,
                     Description = latest.Description,
                     Authors = latest.Authors,
                     LicenseExpression = latest.LicenseMetadata?.License,
@@ -814,6 +860,13 @@ namespace NuGetManagerSlim.Services
                 var meta = allMetadata.FirstOrDefault(m => m.Identity.Equals(identity))
                     ?? allMetadata.OrderByDescending(m => m.Identity.Version).First();
 
+                // The display metadata (description, deps, download count) reflects
+                // the requested version, but the latest stable / prerelease slots
+                // must describe the newest available versions - not the requested
+                // one - so they stay consistent with the latest-metadata path.
+                var (latestStable, latestPrerelease) = SelectLatestVersions(
+                    allMetadata.Select(m => m.Identity.Version));
+
                 var deps = meta.DependencySets
                     .SelectMany(ds => ds.Packages.Select(p => new PackageDependencyInfo
                     {
@@ -848,8 +901,8 @@ namespace NuGetManagerSlim.Services
                 return SourceMetadataOutcome.Hit(new PackageModel
                 {
                     PackageId = meta.Identity.Id,
-                    LatestStableVersion = meta.Identity.Version.IsPrerelease ? null : meta.Identity.Version,
-                    LatestPrereleaseVersion = meta.Identity.Version,
+                    LatestStableVersion = latestStable,
+                    LatestPrereleaseVersion = latestPrerelease,
                     Description = meta.Description,
                     Authors = meta.Authors,
                     LicenseExpression = meta.LicenseMetadata?.License,

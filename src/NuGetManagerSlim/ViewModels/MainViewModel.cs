@@ -418,6 +418,15 @@ namespace NuGetManagerSlim.ViewModels
         }
         partial void OnFilterPrereleaseChanged(bool value) => _ = ReloadPackagesAsync();
 
+        // Builds a row pre-configured with the current prerelease preference so
+        // update detection, the update badge, and the update target track
+        // prereleases whenever the user has opted into them. Rows are rebuilt on
+        // every reload (including when the prerelease toggle changes), so setting
+        // the flag at construction is sufficient.
+        private PackageRowViewModel CreateRow(PackageModel model) =>
+            new(model) { IncludePrerelease = FilterPrerelease };
+
+
         partial void OnIsRemoteLoadingChanged(bool value)
         {
             OnPropertyChanged(nameof(ShowSkeleton));
@@ -626,7 +635,7 @@ namespace NuGetManagerSlim.ViewModels
             try
             {
                 var installed = await _projectService.GetInstalledPackagesAsync(CurrentProject, cancellationToken);
-                var rows = installed.Select(p => new PackageRowViewModel(p)).ToList();
+                var rows = installed.Select(p => CreateRow(p)).ToList();
 
                 string? searchQuery = null;
                 if (!string.IsNullOrWhiteSpace(SearchText))
@@ -660,7 +669,7 @@ namespace NuGetManagerSlim.ViewModels
                             && pkg.PackageId.IndexOf(searchQuery, StringComparison.OrdinalIgnoreCase) < 0)
                             continue;
                         if (seen.Add(pkg.PackageId))
-                            rows.Add(new PackageRowViewModel(pkg));
+                            rows.Add(CreateRow(pkg));
                     }
 
                     await EnrichVulnerabilitiesAsync(rows, cancellationToken).ConfigureAwait(true);
@@ -863,7 +872,7 @@ namespace NuGetManagerSlim.ViewModels
                     foreach (var pkg in transitive)
                     {
                         if (existing.Contains(pkg.PackageId)) continue;
-                        var row = new PackageRowViewModel(pkg);
+                        var row = CreateRow(pkg);
                         if (!string.IsNullOrEmpty(query)
                             && row.PackageId.IndexOf(query, StringComparison.OrdinalIgnoreCase) < 0)
                         {
@@ -1059,7 +1068,7 @@ namespace NuGetManagerSlim.ViewModels
                         Dependencies = m.Dependencies,
                     };
                 }
-                newRows.Add(new PackageRowViewModel(model));
+                newRows.Add(CreateRow(model));
             }
 
             // Single Reset instead of Clear + N Add: collapses 51 CollectionChanged
@@ -1180,21 +1189,22 @@ namespace NuGetManagerSlim.ViewModels
         private async Task QuickUpdateAsync(PackageRowViewModel? row)
         {
             if (row == null) return;
-            if (row.LatestStableVersion == null) return;
+            var target = row.UpdateCandidateVersion;
+            if (target == null) return;
 
             row.IsOperationInProgress = true;
             try
             {
                 if (CurrentProject?.IsSolutionScope == true)
                 {
-                    await FanOutSolutionActionAsync(row, SolutionPackageAction.Update, row.LatestStableVersion);
+                    await FanOutSolutionActionAsync(row, SolutionPackageAction.Update, target);
                 }
                 else if (!string.IsNullOrEmpty(CurrentProject?.ProjectFullPath))
                 {
                     SetStatus($"Updating {row.PackageId}…");
-                    await _projectService.UpdatePackageAsync(CurrentProject!.ProjectFullPath, row.PackageId, row.LatestStableVersion, CancellationToken.None);
-                    RecordMru(row, row.LatestStableVersion);
-                    var done = $"✓ Updated {row.PackageId} → {row.LatestStableVersion}";
+                    await _projectService.UpdatePackageAsync(CurrentProject!.ProjectFullPath, row.PackageId, target, CancellationToken.None);
+                    RecordMru(row, target);
+                    var done = $"✓ Updated {row.PackageId} → {target}";
                     SetStatus(done);
                     AppendOperationLog($"[{DateTime.Now:HH:mm:ss}] {done}");
                     await ReloadPackagesAsync();

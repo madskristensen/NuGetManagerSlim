@@ -14,7 +14,8 @@ namespace NuGetManagerSlim.Tests.ViewModels
             string? latestPre = null,
             bool isTransitive = false,
             string? requiredBy = null,
-            string? source = "nuget.org")
+            string? source = "nuget.org",
+            bool includePrerelease = false)
         {
             return new PackageRowViewModel(new PackageModel
             {
@@ -25,7 +26,10 @@ namespace NuGetManagerSlim.Tests.ViewModels
                 IsTransitive = isTransitive,
                 RequiredByPackageId = requiredBy,
                 SourceName = source,
-            });
+            })
+            {
+                IncludePrerelease = includePrerelease,
+            };
         }
 
         [Fact]
@@ -221,6 +225,63 @@ namespace NuGetManagerSlim.Tests.ViewModels
         {
             var vm = MakeRow(installed: "1.0.0", latestStable: "2.0.0", isTransitive: true);
             Assert.False(vm.HasUpdate);
+        }
+
+        [Fact]
+        public void HasUpdate_StableOnlyMode_IgnoresNewerPrerelease()
+        {
+            // Installed is the latest stable; only a newer prerelease exists. With
+            // prereleases excluded (default) this is not an update.
+            var vm = MakeRow(installed: "2.0.0", latestStable: "2.0.0", latestPre: "3.0.0-beta");
+            Assert.False(vm.HasUpdate);
+            Assert.Equal(NuGetVersion.Parse("2.0.0"), vm.UpdateCandidateVersion);
+        }
+
+        [Fact]
+        public void HasUpdate_PrereleaseMode_OffersNewerPrerelease()
+        {
+            var vm = MakeRow(installed: "2.0.0", latestStable: "2.0.0", latestPre: "3.0.0-beta",
+                includePrerelease: true);
+            Assert.True(vm.HasUpdate);
+            Assert.Equal(NuGetVersion.Parse("3.0.0-beta"), vm.UpdateCandidateVersion);
+            Assert.Equal("→ 3.0.0-beta", vm.UpdateBadge);
+            Assert.Equal("v2.0.0 → v3.0.0-beta", vm.VersionInformation);
+        }
+
+        [Fact]
+        public void HasUpdate_PrereleaseMode_PrefersStableWhenHigher()
+        {
+            // A stable higher than the newest prerelease wins as the candidate even
+            // when prereleases are included.
+            var vm = MakeRow(installed: "1.0.0", latestStable: "3.0.0", latestPre: "2.0.0-beta",
+                includePrerelease: true);
+            Assert.True(vm.HasUpdate);
+            Assert.Equal(NuGetVersion.Parse("3.0.0"), vm.UpdateCandidateVersion);
+        }
+
+        [Fact]
+        public void HasUpdate_PrereleaseMode_NoNewerVersion_ReturnsFalse()
+        {
+            var vm = MakeRow(installed: "3.0.0", latestStable: "3.0.0", latestPre: "2.0.0-beta",
+                includePrerelease: true);
+            Assert.False(vm.HasUpdate);
+        }
+
+        [Fact]
+        public void IncludePrerelease_Toggle_RaisesUpdateNotifications()
+        {
+            var vm = MakeRow(installed: "2.0.0", latestStable: "2.0.0", latestPre: "3.0.0-beta");
+            Assert.False(vm.HasUpdate);
+
+            var changed = new System.Collections.Generic.List<string>();
+            vm.PropertyChanged += (_, e) => changed.Add(e.PropertyName!);
+
+            vm.IncludePrerelease = true;
+
+            Assert.True(vm.HasUpdate);
+            Assert.Contains(nameof(vm.HasUpdate), changed);
+            Assert.Contains(nameof(vm.UpdateCandidateVersion), changed);
+            Assert.Contains(nameof(vm.UpdateBadge), changed);
         }
 
         [Fact]

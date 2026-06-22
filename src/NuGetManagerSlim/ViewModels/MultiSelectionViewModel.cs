@@ -102,7 +102,7 @@ namespace NuGetManagerSlim.ViewModels
             foreach (var row in targets)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var version = row.LatestStableVersion ?? row.LatestPrereleaseVersion;
+                var version = row.UpdateCandidateVersion;
                 if (version == null) { fail++; continue; }
                 try
                 {

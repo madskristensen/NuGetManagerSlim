@@ -70,6 +70,7 @@ namespace NuGetManagerSlim.ViewModels
             };
             OnPropertyChanged(nameof(AuthorDisplay));
             OnPropertyChanged(nameof(HasUpdate));
+            OnPropertyChanged(nameof(UpdateCandidateVersion));
             OnPropertyChanged(nameof(VersionInformation));
             OnPropertyChanged(nameof(UpdateBadge));
             OnPropertyChanged(nameof(DownloadCountDisplay));
@@ -90,10 +91,47 @@ namespace NuGetManagerSlim.ViewModels
         public bool IsPrerelease => _model.LatestPrereleaseVersion?.IsPrerelease == true
                                     && _model.LatestStableVersion == null;
 
+        // When set, an "update" tracks prereleases too (mirrors the host's
+        // "Include prerelease" toggle). Update detection, the badge, and the
+        // update target all key off this so prerelease-tracking users aren't
+        // silently told a package is up to date when only a newer prerelease
+        // exists. Defaults to false so the common stable-only path is unchanged.
+        public bool IncludePrerelease
+        {
+            get => _includePrerelease;
+            set
+            {
+                if (_includePrerelease == value) return;
+                _includePrerelease = value;
+                OnPropertyChanged(nameof(IncludePrerelease));
+                OnPropertyChanged(nameof(UpdateCandidateVersion));
+                OnPropertyChanged(nameof(HasUpdate));
+                OnPropertyChanged(nameof(VersionInformation));
+                OnPropertyChanged(nameof(UpdateBadge));
+            }
+        }
+        private bool _includePrerelease;
+
+        // The version an update would move the installed package to: the latest
+        // stable, or - when prereleases are included - the highest of the stable
+        // and prerelease candidates. Null when no newer version is known.
+        public NuGetVersion? UpdateCandidateVersion
+        {
+            get
+            {
+                var stable = _model.LatestStableVersion;
+                if (!_includePrerelease) return stable;
+                var pre = _model.LatestPrereleaseVersion;
+                if (stable == null) return pre;
+                if (pre == null) return stable;
+                return pre > stable ? pre : stable;
+            }
+        }
+
         public bool HasUpdate => IsInstalled
             && !IsTransitive
-            && _model.LatestStableVersion != null
-            && _model.LatestStableVersion > _model.InstalledVersion;
+            && UpdateCandidateVersion != null
+            && UpdateCandidateVersion > _model.InstalledVersion;
 
         public string InstalledVersionDisplay
         {
@@ -115,7 +153,7 @@ namespace NuGetManagerSlim.ViewModels
                 if (IsInstalled)
                 {
                     return HasUpdate
-                        ? $"v{_model.InstalledVersion} → v{_model.LatestStableVersion}"
+                        ? $"v{_model.InstalledVersion} → v{UpdateCandidateVersion}"
                         : $"v{_model.InstalledVersion}";
                 }
                 else
@@ -126,7 +164,7 @@ namespace NuGetManagerSlim.ViewModels
             }
         }
 
-        public string UpdateBadge => HasUpdate ? $"→ {_model.LatestStableVersion}" : string.Empty;
+        public string UpdateBadge => HasUpdate ? $"→ {UpdateCandidateVersion}" : string.Empty;
 
         public string AuthorDisplay => string.IsNullOrEmpty(_model.Authors) ? string.Empty : $"by {_model.Authors}";
 
