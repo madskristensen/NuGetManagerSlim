@@ -615,6 +615,13 @@ namespace NuGetManagerSlim.ViewModels
         {
             if (CurrentProject == null) return;
 
+            // Abort any transitive load still running from a previous filter
+            // state. The Installed path below starts a fresh one; the Updates and
+            // Vulnerable paths intentionally don't, so without this an in-flight
+            // load started in the Installed view could append transitive rows
+            // into the Updates/Vulnerable list once it completes (issue #14).
+            CancelCts(ref _transitiveCts);
+
             IsLoading = true;
             try
             {
@@ -842,8 +849,11 @@ namespace NuGetManagerSlim.ViewModels
                 RunOnUI(() =>
                 {
                     if (ct.IsCancellationRequested) return;
-                    // Bail if the user switched scope while we were parsing.
-                    if (!FilterInstalled || FilterUpdates) return;
+                    // Only append transitives while the Installed view is active.
+                    // Vulnerable also sets FilterInstalled = true, so a plain
+                    // FilterInstalled check would let a stale load leak rows into
+                    // that view (issue #14); compare the resolved view mode instead.
+                    if (ViewMode != PackageViewMode.Installed) return;
 
                     var existing = new HashSet<string>(
                         _packages.Select(p => p.PackageId),
