@@ -271,25 +271,43 @@ namespace NuGetManagerSlim.ViewModels
         }
 
         [RelayCommand]
-        private void OpenLicense()
+        private async Task OpenLicenseAsync()
         {
-            if (!string.IsNullOrEmpty(LicenseUrl))
-                System.Diagnostics.Process.Start(LicenseUrl);
+            await OpenUrlAsync(LicenseUrl);
         }
 
         [RelayCommand]
-        private void OpenProjectUrl()
+        private async Task OpenProjectUrlAsync()
         {
-            if (!string.IsNullOrEmpty(ProjectUrl))
-                System.Diagnostics.Process.Start(ProjectUrl);
+            await OpenUrlAsync(ProjectUrl);
         }
 
         [RelayCommand]
-        private void OpenNuGetOrg()
+        private async Task OpenNuGetOrgAsync()
         {
             var url = $"https://www.nuget.org/packages/{PackageId}";
             if (SelectedVersion != null) url += $"/{SelectedVersion}";
-            System.Diagnostics.Process.Start(url);
+            await OpenUrlAsync(url);
+        }
+
+        private static async Task OpenUrlAsync(string? url)
+        {
+            if (string.IsNullOrEmpty(url)) return;
+
+            if (!Uri.TryCreate(url, UriKind.Absolute, out Uri uri) ||
+                (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+            {
+                return;
+            }
+
+            try
+            {
+                System.Diagnostics.Process.Start(uri.AbsoluteUri);
+            }
+            catch (Exception ex)
+            {
+                await ex.LogAsync();
+            }
         }
 
         private static string FormatDownloadCount(long count)

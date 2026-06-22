@@ -68,11 +68,13 @@ namespace NuGetManagerSlim.ToolWindows
             {
                 DetailScrollViewer?.ScrollToTop();
             }
-            else if (e.PropertyName == nameof(MainViewModel.CurrentProject))
+            else if (e.PropertyName == nameof(MainViewModel.CurrentProject)
+                  || e.PropertyName == nameof(MainViewModel.ViewMode))
             {
                 // Reset the package list scroll position when the user
-                // switches projects so the new project's list is read from
-                // the top instead of inheriting the previous list's offset.
+                // switches projects or view modes (Installed, Vulnerable,
+                // etc.) so the new list is read from the top instead of
+                // inheriting the previous list's offset.
                 ScrollPackageListToTop();
             }
             else if (e.PropertyName == nameof(MainViewModel.HasDetailPane)
