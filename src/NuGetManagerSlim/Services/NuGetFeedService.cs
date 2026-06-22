@@ -531,8 +531,8 @@ namespace NuGetManagerSlim.Services
                     return hit.Value;
             }
 
-            var result = await GetPackageMetadataCoreAsync(packageId ?? string.Empty, cancellationToken).ConfigureAwait(false);
-            if (!cancellationToken.IsCancellationRequested)
+            var (result, anySourceFaulted) = await GetPackageMetadataCoreAsync(packageId ?? string.Empty, cancellationToken).ConfigureAwait(false);
+            if (!cancellationToken.IsCancellationRequested && ShouldCacheMetadataResult(result, anySourceFaulted))
                 StoreMetadata(key, result);
             return result;
         }
@@ -553,12 +553,39 @@ namespace NuGetManagerSlim.Services
             return false;
         }
 
-        private async Task<PackageModel?> GetPackageMetadataCoreAsync(
+        // Decides whether a metadata fan-out result is safe to cache. A non-null
+        // hit is always cacheable. A null (no-match) result is only cacheable when
+        // every source actually completed: if any source faulted (transient
+        // network/proxy/credential failure) the package may genuinely exist there,
+        // so caching the null would wrongly mark it "up to date" for the full TTL
+        // even after connectivity is restored (issue #16).
+        public static bool ShouldCacheMetadataResult(PackageModel? value, bool anySourceFaulted)
+            => value != null || !anySourceFaulted;
+
+        private enum SourceMetadataStatus { Found, NotFound, Faulted }
+
+        private readonly struct SourceMetadataOutcome
+        {
+            private SourceMetadataOutcome(PackageModel? value, SourceMetadataStatus status)
+            {
+                Value = value;
+                Status = status;
+            }
+
+            public PackageModel? Value { get; }
+            public SourceMetadataStatus Status { get; }
+
+            public static readonly SourceMetadataOutcome NotFound = new(null, SourceMetadataStatus.NotFound);
+            public static readonly SourceMetadataOutcome Faulted = new(null, SourceMetadataStatus.Faulted);
+            public static SourceMetadataOutcome Hit(PackageModel value) => new(value, SourceMetadataStatus.Found);
+        }
+
+        private async Task<(PackageModel? Value, bool AnySourceFaulted)> GetPackageMetadataCoreAsync(
             string packageId,
             CancellationToken cancellationToken)
         {
             var sources = GetEnabledSources();
-            if (sources.Count == 0) return null;
+            if (sources.Count == 0) return (null, false);
 
             // Fan out across enabled sources in parallel and return the first
             // non-null result. The serial loop this replaces could block for the
@@ -571,17 +598,21 @@ namespace NuGetManagerSlim.Services
                 .Select(src => FetchLatestMetadataFromSourceAsync(src, packageId, token))
                 .ToList();
 
+            var anyFaulted = false;
             try
             {
                 while (tasks.Count > 0)
                 {
                     var done = await Task.WhenAny(tasks).ConfigureAwait(false);
                     tasks.Remove(done);
-                    if (done.Status == TaskStatus.RanToCompletion && done.Result != null)
+                    if (done.Status != TaskStatus.RanToCompletion) continue;
+                    var outcome = done.Result;
+                    if (outcome.Status == SourceMetadataStatus.Found && outcome.Value != null)
                     {
                         perCallCts.Cancel();
-                        return done.Result;
+                        return (outcome.Value, anyFaulted);
                     }
+                    if (outcome.Status == SourceMetadataStatus.Faulted) anyFaulted = true;
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -589,10 +620,10 @@ namespace NuGetManagerSlim.Services
                 throw;
             }
 
-            return null;
+            return (null, anyFaulted);
         }
 
-        private async Task<PackageModel?> FetchLatestMetadataFromSourceAsync(
+        private async Task<SourceMetadataOutcome> FetchLatestMetadataFromSourceAsync(
             PackageSourceModel source,
             string packageId,
             CancellationToken cancellationToken)
@@ -600,14 +631,14 @@ namespace NuGetManagerSlim.Services
             try
             {
                 var resource = await GetMetadataResourceAsync(source, cancellationToken).ConfigureAwait(false);
-                if (resource == null) return null;
+                if (resource == null) return SourceMetadataOutcome.NotFound;
 
                 var metadata = await resource.GetMetadataAsync(
                     packageId, includePrerelease: true, includeUnlisted: false,
                     _cacheContext, _logger, cancellationToken).ConfigureAwait(false);
 
                 var latest = metadata.OrderByDescending(m => m.Identity.Version).FirstOrDefault();
-                if (latest == null) return null;
+                if (latest == null) return SourceMetadataOutcome.NotFound;
 
                 var deps = latest.DependencySets
                     .SelectMany(ds => ds.Packages.Select(p => new PackageDependencyInfo
@@ -643,7 +674,7 @@ namespace NuGetManagerSlim.Services
                     catch { /* search fallback is best-effort */ }
                 }
 
-                return new PackageModel
+                return SourceMetadataOutcome.Hit(new PackageModel
                 {
                     PackageId = latest.Identity.Id,
                     LatestStableVersion = latest.Identity.Version.IsPrerelease ? null : latest.Identity.Version,
@@ -659,7 +690,7 @@ namespace NuGetManagerSlim.Services
                     Published = latest.Published,
                     Dependencies = deps,
                     Vulnerabilities = MapVulnerabilities(latest),
-                };
+                });
             }
             catch (OperationCanceledException)
             {
@@ -667,8 +698,9 @@ namespace NuGetManagerSlim.Services
             }
             catch
             {
-                // Source failed - the fan-out continues with the others.
-                return null;
+                // Source failed (transient network/proxy/credential error). Signal
+                // the fault so the caller won't cache a misleading negative result.
+                return SourceMetadataOutcome.Faulted;
             }
         }
 
@@ -710,19 +742,19 @@ namespace NuGetManagerSlim.Services
                     return hit.Value;
             }
 
-            var result = await GetPackageMetadataCoreAsync(packageId ?? string.Empty, version!, cancellationToken).ConfigureAwait(false);
-            if (!cancellationToken.IsCancellationRequested)
+            var (result, anySourceFaulted) = await GetPackageMetadataCoreAsync(packageId ?? string.Empty, version!, cancellationToken).ConfigureAwait(false);
+            if (!cancellationToken.IsCancellationRequested && ShouldCacheMetadataResult(result, anySourceFaulted))
                 StoreMetadata(key, result);
             return result;
         }
 
-        private async Task<PackageModel?> GetPackageMetadataCoreAsync(
+        private async Task<(PackageModel? Value, bool AnySourceFaulted)> GetPackageMetadataCoreAsync(
             string packageId,
             NuGetVersion version,
             CancellationToken cancellationToken)
         {
             var sources = GetEnabledSources();
-            if (sources.Count == 0) return null;
+            if (sources.Count == 0) return (null, false);
 
             var identity = new global::NuGet.Packaging.Core.PackageIdentity(packageId, version);
             using var perCallCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -731,17 +763,21 @@ namespace NuGetManagerSlim.Services
                 .Select(src => FetchVersionedMetadataFromSourceAsync(src, packageId, identity, token))
                 .ToList();
 
+            var anyFaulted = false;
             try
             {
                 while (tasks.Count > 0)
                 {
                     var done = await Task.WhenAny(tasks).ConfigureAwait(false);
                     tasks.Remove(done);
-                    if (done.Status == TaskStatus.RanToCompletion && done.Result != null)
+                    if (done.Status != TaskStatus.RanToCompletion) continue;
+                    var outcome = done.Result;
+                    if (outcome.Status == SourceMetadataStatus.Found && outcome.Value != null)
                     {
                         perCallCts.Cancel();
-                        return done.Result;
+                        return (outcome.Value, anyFaulted);
                     }
+                    if (outcome.Status == SourceMetadataStatus.Faulted) anyFaulted = true;
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -749,10 +785,10 @@ namespace NuGetManagerSlim.Services
                 throw;
             }
 
-            return null;
+            return (null, anyFaulted);
         }
 
-        private async Task<PackageModel?> FetchVersionedMetadataFromSourceAsync(
+        private async Task<SourceMetadataOutcome> FetchVersionedMetadataFromSourceAsync(
             PackageSourceModel source,
             string packageId,
             global::NuGet.Packaging.Core.PackageIdentity identity,
@@ -761,7 +797,7 @@ namespace NuGetManagerSlim.Services
             try
             {
                 var resource = await GetMetadataResourceAsync(source, cancellationToken).ConfigureAwait(false);
-                if (resource == null) return null;
+                if (resource == null) return SourceMetadataOutcome.NotFound;
 
                 // Pull the full registration index for the package once and pick
                 // the matching version. This is what GetMetadataAsync(identity, ...)
@@ -773,7 +809,7 @@ namespace NuGetManagerSlim.Services
                     packageId, includePrerelease: true, includeUnlisted: true,
                     _cacheContext, _logger, cancellationToken).ConfigureAwait(false))?.ToList();
 
-                if (allMetadata == null || allMetadata.Count == 0) return null;
+                if (allMetadata == null || allMetadata.Count == 0) return SourceMetadataOutcome.NotFound;
 
                 var meta = allMetadata.FirstOrDefault(m => m.Identity.Equals(identity))
                     ?? allMetadata.OrderByDescending(m => m.Identity.Version).First();
@@ -809,7 +845,7 @@ namespace NuGetManagerSlim.Services
                     catch { /* search fallback is best-effort */ }
                 }
 
-                return new PackageModel
+                return SourceMetadataOutcome.Hit(new PackageModel
                 {
                     PackageId = meta.Identity.Id,
                     LatestStableVersion = meta.Identity.Version.IsPrerelease ? null : meta.Identity.Version,
@@ -824,12 +860,14 @@ namespace NuGetManagerSlim.Services
                     IconUrl = meta.IconUrl?.ToString(),
                     Dependencies = deps,
                     Vulnerabilities = MapVulnerabilities(meta),
-                };
+                });
             }
             catch (OperationCanceledException) { throw; }
             catch
             {
-                return null;
+                // Transient source failure: signal the fault so a misleading
+                // negative result isn't cached (issue #16).
+                return SourceMetadataOutcome.Faulted;
             }
         }
 
