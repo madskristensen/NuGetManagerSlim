@@ -532,7 +532,7 @@ namespace NuGetManagerSlim.ViewModels
                             .Where(r => r.IsInstalled && r.LatestStableVersion == null)
                             .ToList();
                         if (needsEnrichCache.Count > 0)
-                            EnrichInstalledMetadataInBackground(needsEnrichCache);
+                            EnrichInstalledMetadataInBackground(needsEnrichCache, ReplaceCts(ref _enrichCts));
                         return;
                     }
 
@@ -562,7 +562,7 @@ namespace NuGetManagerSlim.ViewModels
                         .Where(r => r.IsInstalled && r.LatestStableVersion == null)
                         .ToList();
                     if (needsEnrich.Count > 0)
-                        EnrichInstalledMetadataInBackground(needsEnrich);
+                        EnrichInstalledMetadataInBackground(needsEnrich, ReplaceCts(ref _enrichCts));
                 }
                 else
                 {
@@ -697,20 +697,29 @@ namespace NuGetManagerSlim.ViewModels
                 // project - those would race against the next ApplyFilters.
                 cancellationToken.ThrowIfCancellationRequested();
 
-                if (!FilterUpdates)
-                {
-                    EnrichInstalledMetadataInBackground(Packages.ToList());
-                }
                 SeedMruFromInstalled(installed);
 
-                // Transitive packages are read from project.assets.json which
-                // can be slow on first cold restore. Kick the load off in the
-                // background so the direct-package list lands immediately;
-                // transitives append to the list once parsed. Skip in the
-                // Updates view since transitives can't be updated through us.
-                if (FilterInstalled && !FilterUpdates)
+                // The Updates view resolves metadata synchronously above, so it
+                // neither needs nor should disturb the background enrichment scope.
+                if (!FilterUpdates)
                 {
-                    LoadTransitivesInBackground(CurrentProject);
+                    // One enrichment scope covers both the direct rows enriched
+                    // here and any transitive rows appended later by
+                    // LoadTransitivesInBackground. Sharing a single token stops the
+                    // transitive enrichment from cancelling the still-in-flight
+                    // direct enrichment, which previously left rows with
+                    // half-populated metadata when switching view modes (issue #13).
+                    var enrichToken = ReplaceCts(ref _enrichCts);
+                    EnrichInstalledMetadataInBackground(Packages.ToList(), enrichToken);
+
+                    // Transitive packages are read from project.assets.json which
+                    // can be slow on first cold restore. Kick the load off in the
+                    // background so the direct-package list lands immediately;
+                    // transitives append to the list once parsed.
+                    if (FilterInstalled)
+                    {
+                        LoadTransitivesInBackground(CurrentProject, enrichToken);
+                    }
                 }
             }
             catch (OperationCanceledException) { throw; }
@@ -784,10 +793,8 @@ namespace NuGetManagerSlim.ViewModels
             catch (OperationCanceledException) { }
         }
 
-        private void EnrichInstalledMetadataInBackground(IReadOnlyList<PackageRowViewModel> rows)
+        private void EnrichInstalledMetadataInBackground(IReadOnlyList<PackageRowViewModel> rows, CancellationToken ct)
         {
-            var ct = ReplaceCts(ref _enrichCts);
-
             _ = Task.Run(async () =>
             {
                 var tasks = rows.Select(async row =>
@@ -814,7 +821,7 @@ namespace NuGetManagerSlim.ViewModels
         // a different project, or refreshes before we finish parsing. Browse-
         // mode results never include transitives, so this only runs in the
         // Installed view.
-        private void LoadTransitivesInBackground(ProjectScopeModel scope)
+        private void LoadTransitivesInBackground(ProjectScopeModel scope, CancellationToken enrichToken)
         {
             var ct = ReplaceCts(ref _transitiveCts);
 
@@ -860,7 +867,7 @@ namespace NuGetManagerSlim.ViewModels
                     {
                         OnPropertyChanged(nameof(HasPackages));
                         OnPropertyChanged(nameof(IsEmptyState));
-                        EnrichInstalledMetadataInBackground(newRows);
+                        EnrichInstalledMetadataInBackground(newRows, enrichToken);
                     }
                 });
             }, ct);
