@@ -40,63 +40,39 @@ namespace NuGetManagerSlim.ViewModels
                 OnPropertyChanged(nameof(HasIcon));
                 OnPropertyChanged(nameof(Icon));
             }
-            if (string.IsNullOrEmpty(_model.Authors) && !string.IsNullOrEmpty(metadata.Authors))
+            // Always merge the fetched metadata into the model. The latest-version
+            // backfill is the whole point of enrichment (it drives the update badge
+            // and the Updates view), so it must not be gated on display-only fields:
+            // private/Azure Artifacts/GitHub feeds routinely return no authors and a
+            // zero download count, and previously that combination skipped the merge
+            // entirely, leaving LatestStableVersion unset (issue #15). Existing values
+            // win so user-facing data already on the row is never overwritten.
+            _model = new PackageModel
             {
-                _model = new PackageModel
-                {
-                    PackageId = _model.PackageId,
-                    InstalledVersion = _model.InstalledVersion,
-                    LatestStableVersion = _model.LatestStableVersion ?? metadata.LatestStableVersion,
-                    LatestPrereleaseVersion = _model.LatestPrereleaseVersion ?? metadata.LatestPrereleaseVersion,
-                    Description = _model.Description ?? metadata.Description,
-                    Authors = metadata.Authors,
-                    LicenseExpression = _model.LicenseExpression ?? metadata.LicenseExpression,
-                    LicenseUrl = _model.LicenseUrl ?? metadata.LicenseUrl,
-                    DownloadCount = _model.DownloadCount > 0 ? _model.DownloadCount : metadata.DownloadCount,
-                    SourceName = _model.SourceName,
-                    IsTransitive = _model.IsTransitive,
-                    RequiredByPackageId = _model.RequiredByPackageId,
-                    ReadmeUrl = _model.ReadmeUrl ?? metadata.ReadmeUrl,
-                    ProjectUrl = _model.ProjectUrl ?? metadata.ProjectUrl,
-                    IconUrl = _iconUrlOverride ?? metadata.IconUrl,
-                    PerFrameworkVersions = _model.PerFrameworkVersions,
-                    Dependencies = _model.Dependencies,
-                    AllowedVersionRange = _model.AllowedVersionRange,
-                };
-                OnPropertyChanged(nameof(AuthorDisplay));
-                OnPropertyChanged(nameof(HasUpdate));
-                OnPropertyChanged(nameof(VersionInformation));
-                OnPropertyChanged(nameof(UpdateBadge));
-                OnPropertyChanged(nameof(DownloadCountDisplay));
-            }
-            else if (_model.DownloadCount <= 0 && metadata.DownloadCount > 0)
-            {
-                _model = new PackageModel
-                {
-                    PackageId = _model.PackageId,
-                    InstalledVersion = _model.InstalledVersion,
-                    LatestStableVersion = _model.LatestStableVersion ?? metadata.LatestStableVersion,
-                    LatestPrereleaseVersion = _model.LatestPrereleaseVersion ?? metadata.LatestPrereleaseVersion,
-                    Description = _model.Description ?? metadata.Description,
-                    Authors = _model.Authors,
-                    LicenseExpression = _model.LicenseExpression ?? metadata.LicenseExpression,
-                    LicenseUrl = _model.LicenseUrl ?? metadata.LicenseUrl,
-                    DownloadCount = metadata.DownloadCount,
-                    SourceName = _model.SourceName,
-                    IsTransitive = _model.IsTransitive,
-                    RequiredByPackageId = _model.RequiredByPackageId,
-                    ReadmeUrl = _model.ReadmeUrl ?? metadata.ReadmeUrl,
-                    ProjectUrl = _model.ProjectUrl ?? metadata.ProjectUrl,
-                    IconUrl = _iconUrlOverride ?? metadata.IconUrl,
-                    PerFrameworkVersions = _model.PerFrameworkVersions,
-                    Dependencies = _model.Dependencies,
-                    AllowedVersionRange = _model.AllowedVersionRange,
-                };
-                OnPropertyChanged(nameof(HasUpdate));
-                OnPropertyChanged(nameof(VersionInformation));
-                OnPropertyChanged(nameof(UpdateBadge));
-                OnPropertyChanged(nameof(DownloadCountDisplay));
-            }
+                PackageId = _model.PackageId,
+                InstalledVersion = _model.InstalledVersion,
+                LatestStableVersion = _model.LatestStableVersion ?? metadata.LatestStableVersion,
+                LatestPrereleaseVersion = _model.LatestPrereleaseVersion ?? metadata.LatestPrereleaseVersion,
+                Description = _model.Description ?? metadata.Description,
+                Authors = string.IsNullOrEmpty(_model.Authors) ? metadata.Authors : _model.Authors,
+                LicenseExpression = _model.LicenseExpression ?? metadata.LicenseExpression,
+                LicenseUrl = _model.LicenseUrl ?? metadata.LicenseUrl,
+                DownloadCount = _model.DownloadCount > 0 ? _model.DownloadCount : metadata.DownloadCount,
+                SourceName = _model.SourceName,
+                IsTransitive = _model.IsTransitive,
+                RequiredByPackageId = _model.RequiredByPackageId,
+                ReadmeUrl = _model.ReadmeUrl ?? metadata.ReadmeUrl,
+                ProjectUrl = _model.ProjectUrl ?? metadata.ProjectUrl,
+                IconUrl = _iconUrlOverride ?? metadata.IconUrl,
+                PerFrameworkVersions = _model.PerFrameworkVersions,
+                Dependencies = _model.Dependencies,
+                AllowedVersionRange = _model.AllowedVersionRange,
+            };
+            OnPropertyChanged(nameof(AuthorDisplay));
+            OnPropertyChanged(nameof(HasUpdate));
+            OnPropertyChanged(nameof(VersionInformation));
+            OnPropertyChanged(nameof(UpdateBadge));
+            OnPropertyChanged(nameof(DownloadCountDisplay));
         }
 
         public string PackageId => _model.PackageId;

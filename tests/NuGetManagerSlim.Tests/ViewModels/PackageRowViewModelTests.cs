@@ -351,6 +351,53 @@ namespace NuGetManagerSlim.Tests.ViewModels
         }
 
         [Fact]
+        public void ApplyMetadata_AppliesLatestVersion_WhenMetadataHasNoAuthorsAndZeroDownloads()
+        {
+            // Regression for issue #15: private/Azure Artifacts/GitHub feeds often
+            // return empty authors and a zero download count. The latest-version
+            // backfill must still be applied so the update badge and Updates view
+            // work; previously this combination skipped the merge entirely.
+            var vm = new PackageRowViewModel(new PackageModel
+            {
+                PackageId = "Pkg",
+                InstalledVersion = NuGetVersion.Parse("1.0.0"),
+            });
+            Assert.False(vm.HasUpdate);
+
+            vm.ApplyMetadata(new PackageModel
+            {
+                PackageId = "Pkg",
+                LatestStableVersion = NuGetVersion.Parse("2.0.0"),
+                Authors = string.Empty,
+                DownloadCount = 0,
+            });
+
+            Assert.True(vm.HasUpdate);
+            Assert.Equal(NuGetVersion.Parse("2.0.0"), vm.LatestStableVersion);
+        }
+
+        [Fact]
+        public void ApplyMetadata_DoesNotOverwriteExistingDownloadCount()
+        {
+            var vm = new PackageRowViewModel(new PackageModel
+            {
+                PackageId = "Pkg",
+                InstalledVersion = NuGetVersion.Parse("1.0.0"),
+                DownloadCount = 5_000,
+            });
+
+            vm.ApplyMetadata(new PackageModel
+            {
+                PackageId = "Pkg",
+                LatestStableVersion = NuGetVersion.Parse("2.0.0"),
+                DownloadCount = 0,
+            });
+
+            Assert.True(vm.HasUpdate);
+            Assert.Equal("5.0K downloads", vm.DownloadCountDisplay);
+        }
+
+        [Fact]
         public void UpdateButtonAccessibleName_ContainsPackageIdAndVersion()
         {
             var vm = MakeRow(installed: "1.0.0", latestStable: "2.0.0");
