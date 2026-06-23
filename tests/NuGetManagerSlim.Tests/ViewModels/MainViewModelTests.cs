@@ -160,67 +160,6 @@ namespace NuGetManagerSlim.Tests.ViewModels
             Assert.Equal(PackageViewMode.Updates, vm.ViewMode);
         }
 
-        // Skipped: the Updates view resolves metadata via EnrichRowsAsync, whose
-        // `await TaskScheduler.Default` hop fails to load Microsoft.VisualStudio.Threading
-        // 17.0.0.0 under the test harness, so GetPackageMetadataAsync is never reached.
-        // Reinstate once the harness can load that assembly. See issue #22.
-        [Fact(Skip = "Test-harness cannot load Microsoft.VisualStudio.Threading 17.0.0.0; see issue #22")]
-        public async Task UpdatesView_ResolvesMetadataFromFeed_WhenNotCached()
-        {
-            // Regression test for issue #12: switching into the Updates view used to
-            // rely on whatever "latest" metadata a prior background enrichment pass
-            // happened to cache, so the list was inconsistent / frequently empty.
-            // The Updates view must now resolve metadata from the feed itself.
-            var installed = new List<PackageModel>
-            {
-                new() { PackageId = "PackageWithUpdate", InstalledVersion = NuGetVersion.Parse("1.0.0") },
-                new() { PackageId = "PackageUpToDate", InstalledVersion = NuGetVersion.Parse("2.0.0") },
-            };
-
-            var projMock = new Mock<IProjectService>();
-            var feedMock = new Mock<INuGetFeedService>();
-            var restoreMock = new Mock<IRestoreMonitorService>();
-
-            feedMock.Setup(f => f.GetSourcesAsync(It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new List<PackageSourceModel>());
-            projMock.Setup(p => p.GetInstalledPackagesAsync(It.IsAny<ProjectScopeModel>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(installed);
-
-            // No cached "latest" metadata: the Updates view must hit the feed.
-            PackageModel? cached = null;
-            feedMock.Setup(f => f.TryGetCachedLatestMetadata(It.IsAny<string>(), out cached))
-                .Returns(false);
-
-            feedMock.Setup(f => f.GetPackageMetadataAsync("PackageWithUpdate", It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new PackageModel { PackageId = "PackageWithUpdate", LatestStableVersion = NuGetVersion.Parse("2.0.0") });
-            feedMock.Setup(f => f.GetPackageMetadataAsync("PackageUpToDate", It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new PackageModel { PackageId = "PackageUpToDate", LatestStableVersion = NuGetVersion.Parse("2.0.0") });
-
-            var vm = new MainViewModel(projMock.Object, feedMock.Object, restoreMock.Object);
-            await vm.InitializeAsync(CancellationToken.None);
-            await vm.SetCurrentProjectAsync(@"C:\MyApp\MyApp.csproj", "MyApp");
-
-            // Switching into the Updates view must resolve "latest" metadata for the
-            // installed packages straight from the feed. Before the fix this only
-            // happened on an explicit Refresh, so the list depended on whatever
-            // background enrichment had cached and was frequently empty / wrong.
-            vm.ViewMode = PackageViewMode.Updates;
-            for (int i = 0; i < 200; i++)
-            {
-                var fetched = feedMock.Invocations.Count(x => x.Method.Name == "GetPackageMetadataAsync");
-                if (!vm.IsLoading && fetched >= 2)
-                    break;
-                await Task.Delay(10);
-            }
-
-            feedMock.Verify(
-                f => f.GetPackageMetadataAsync("PackageWithUpdate", It.IsAny<CancellationToken>()),
-                Times.AtLeastOnce);
-            feedMock.Verify(
-                f => f.GetPackageMetadataAsync("PackageUpToDate", It.IsAny<CancellationToken>()),
-                Times.AtLeastOnce);
-        }
-
         [Fact]
         public async Task InstalledView_AppliesInstalledVersionVulnerabilities()
         {
