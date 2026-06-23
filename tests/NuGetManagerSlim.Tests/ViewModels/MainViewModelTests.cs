@@ -252,6 +252,46 @@ namespace NuGetManagerSlim.Tests.ViewModels
         }
 
         [Fact]
+        public void ViewMode_SetToSameValue_DoesNotRaisePropertyChanged()
+        {
+            // Setting ViewMode to the value it already has must be a no-op so it
+            // can't trigger a redundant reload or re-raise PropertyChanged.
+            var (vm, _, _, _) = CreateViewModel();
+            vm.ViewMode = PackageViewMode.Vulnerable;
+
+            var raised = 0;
+            vm.PropertyChanged += (s, e) =>
+            {
+                if (e.PropertyName == nameof(MainViewModel.ViewMode))
+                    raised++;
+            };
+
+            vm.ViewMode = PackageViewMode.Vulnerable;
+
+            Assert.Equal(0, raised);
+            Assert.Equal(PackageViewMode.Vulnerable, vm.ViewMode);
+        }
+
+        [Fact]
+        public async Task ClearCurrentProject_PreservesViewMode()
+        {
+            // Issue #18: the view-mode menu controller anchors its icon to the
+            // command the user last clicked and can't be repositioned in code, so
+            // clearing the project (e.g. on a solution switch) must keep the
+            // selected mode. Otherwise the toolbar icon and the package list
+            // disagree once the next solution loads.
+            var (vm, _, _, _) = CreateViewModel();
+            await vm.InitializeAsync(CancellationToken.None);
+            await vm.SetCurrentProjectAsync(@"C:\MyApp\MyApp.csproj", "MyApp");
+            vm.ViewMode = PackageViewMode.Vulnerable;
+
+            vm.ClearCurrentProject();
+
+            Assert.Equal(PackageViewMode.Vulnerable, vm.ViewMode);
+            Assert.True(vm.FilterVulnerable);
+        }
+
+        [Fact]
         public void ExtractSourceFilter_NoToken_ReturnsNullSources()
         {
             var (clean, sources) = MainViewModel.ExtractSourceFilter("newtonsoft");

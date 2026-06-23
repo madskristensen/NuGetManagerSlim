@@ -92,7 +92,12 @@ namespace NuGetManagerSlim.ViewModels
                 var installed = row.InstalledVersion;
                 var items = new List<VersionListItem>(versions.Count);
                 foreach (var v in versions)
-                    items.Add(new VersionListItem(v, installed != null && v.Equals(installed)));
+                    items.Add(new VersionListItem(
+                        v.Version,
+                        installed != null && v.Version.Equals(installed),
+                        v.IsDeprecated,
+                        v.IsVulnerable,
+                        v.DeprecationReason));
                 _availableVersions.ReplaceAll(items);
 
                 var initial = installed ?? (AvailableVersions.Count > 0 ? AvailableVersions[0].Version : null);
@@ -342,18 +347,34 @@ namespace NuGetManagerSlim.ViewModels
     }
 
     // Wraps a NuGetVersion for the detail-pane version dropdown so the item
-    // template can highlight the row matching the project's installed version.
+    // template can highlight the row matching the project's installed version
+    // and flag versions the feed reports as deprecated or vulnerable (issue #21).
     public class VersionListItem
     {
-        public VersionListItem(NuGetVersion version, bool isInstalled)
+        public VersionListItem(
+            NuGetVersion version,
+            bool isInstalled,
+            bool isDeprecated = false,
+            bool isVulnerable = false,
+            string? deprecationReason = null)
         {
             Version = version;
             IsInstalled = isInstalled;
+            IsDeprecated = isDeprecated;
+            IsVulnerable = isVulnerable;
+            DeprecationReason = deprecationReason;
         }
 
         public NuGetVersion Version { get; }
         public bool IsInstalled { get; }
+        public bool IsDeprecated { get; }
+        public bool IsVulnerable { get; }
+        public string? DeprecationReason { get; }
         public string DisplayText => Version.ToNormalizedString();
+
+        public string DeprecationTooltip => string.IsNullOrEmpty(DeprecationReason)
+            ? "This version is deprecated"
+            : $"This version is deprecated: {DeprecationReason}";
 
         public override string ToString() => DisplayText;
     }

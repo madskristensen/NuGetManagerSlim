@@ -67,7 +67,7 @@ namespace NuGetManagerSlim.Services
             }
         }
 
-        private void StoreVersions(string key, IReadOnlyList<NuGetVersion> value)
+        private void StoreVersions(string key, IReadOnlyList<PackageVersionInfo> value)
         {
             lock (_versionsCacheLock)
             {
@@ -184,7 +184,7 @@ namespace NuGetManagerSlim.Services
         private sealed class VersionsCacheEntry
         {
             public DateTime ExpiresUtc;
-            public IReadOnlyList<NuGetVersion> Value = Array.Empty<NuGetVersion>();
+            public IReadOnlyList<PackageVersionInfo> Value = Array.Empty<PackageVersionInfo>();
         }
 
         private readonly Dictionary<string, MetadataCacheEntry> _metadataCache = new(StringComparer.OrdinalIgnoreCase);
@@ -924,7 +924,7 @@ namespace NuGetManagerSlim.Services
             }
         }
 
-        public async Task<IReadOnlyList<NuGetVersion>> GetVersionsAsync(
+        public async Task<IReadOnlyList<PackageVersionInfo>> GetVersionsAsync(
             string packageId,
             bool includePrerelease,
             CancellationToken cancellationToken)
@@ -942,7 +942,7 @@ namespace NuGetManagerSlim.Services
             return fresh;
         }
 
-        private async Task<IReadOnlyList<NuGetVersion>> GetVersionsCoreAsync(
+        private async Task<IReadOnlyList<PackageVersionInfo>> GetVersionsCoreAsync(
             string packageId,
             bool includePrerelease,
             CancellationToken cancellationToken)
@@ -967,13 +967,23 @@ namespace NuGetManagerSlim.Services
                     // sequence rather than throwing; fall through to the next
                     // source instead of returning an empty list as the answer.
                     if (metadata == null) continue;
-                    var filtered = metadata
-                        .Select(m => m.Identity.Version)
-                        .Where(v => v != null && (includePrerelease || !v.IsPrerelease))
-                        .OrderByDescending(v => v)
+                    var candidates = metadata
+                        .Where(m => m?.Identity?.Version != null
+                            && (includePrerelease || !m.Identity.Version.IsPrerelease))
                         .ToList();
-                    if (filtered.Count == 0) continue;
-                    return filtered;
+                    if (candidates.Count == 0) continue;
+
+                    // Resolve the per-version deprecated / vulnerable status from the
+                    // registration metadata we already fetched so the dropdown can flag
+                    // each version (issue #21). Vulnerabilities are embedded in the
+                    // registration leaf; deprecation is read via the leaf's accessor,
+                    // which doesn't require an extra round trip for v3 feeds.
+                    var infos = await Task.WhenAll(candidates.Select(m =>
+                        BuildVersionInfoAsync(m))).ConfigureAwait(false);
+
+                    return infos
+                        .OrderByDescending(i => i.Version)
+                        .ToList();
                 }
                 catch (OperationCanceledException)
                 {
@@ -986,6 +996,33 @@ namespace NuGetManagerSlim.Services
             }
 
             return [];
+        }
+
+        private static async Task<PackageVersionInfo> BuildVersionInfoAsync(IPackageSearchMetadata metadata)
+        {
+            var isVulnerable = metadata.Vulnerabilities != null && metadata.Vulnerabilities.Any();
+
+            var isDeprecated = false;
+            string? reason = null;
+            try
+            {
+                var deprecation = await metadata.GetDeprecationMetadataAsync().ConfigureAwait(false);
+                if (deprecation != null)
+                {
+                    isDeprecated = true;
+                    reason = deprecation.Reasons != null && deprecation.Reasons.Any()
+                        ? string.Join(", ", deprecation.Reasons)
+                        : deprecation.Message;
+                }
+            }
+            catch (OperationCanceledException) { throw; }
+            catch
+            {
+                // Deprecation lookup is best-effort; a failure shouldn't drop the
+                // version from the list.
+            }
+
+            return new PackageVersionInfo(metadata.Identity.Version, isDeprecated, isVulnerable, reason);
         }
 
         public Task<IReadOnlyList<PackageSourceModel>> GetSourcesAsync(CancellationToken cancellationToken)

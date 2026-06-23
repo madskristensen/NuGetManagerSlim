@@ -114,6 +114,13 @@ namespace NuGetManagerSlim.ViewModels
             }
             set
             {
+                // No-op when the mode isn't actually changing. This keeps a
+                // redundant set (e.g. the toolbar re-executing the command that
+                // syncs the menu-controller anchor icon) from kicking off an
+                // extra reload or re-raising PropertyChanged, which would
+                // otherwise loop with the anchor-sync handler.
+                if (value == ViewMode) return;
+
                 _suppressFilterReload = true;
                 try
                 {
@@ -359,10 +366,14 @@ namespace NuGetManagerSlim.ViewModels
             Detail = null;
             MultiSelection = null;
             SelectedPackage = null;
-            // Always start fresh in Browse when the solution closes so the
-            // next solution loads at the default scope rather than inheriting
-            // whatever the user last picked.
-            ViewMode = PackageViewMode.Browse;
+            // Deliberately keep the current ViewMode. The view-mode menu
+            // controller anchors its icon to the command the user last clicked,
+            // and that anchor can't be moved programmatically. Resetting the
+            // mode here (e.g. to Browse on solution switch) left the dropdown
+            // showing the new mode while the toolbar icon stayed on the old one.
+            // Preserving the selection keeps the icon, the dropdown check mark,
+            // and the package list in agreement, and the next solution simply
+            // loads under the same filter the user already had selected.
             UpdateEmptyState();
             OnPropertyChanged(nameof(HasPackages));
             OnPropertyChanged(nameof(IsEmptyState));

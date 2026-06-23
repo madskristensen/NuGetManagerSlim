@@ -697,26 +697,42 @@
                                          selection box itself uses ToString() and shows the
                                          plain version, so the highlight only appears in the
                                          open list (which is what we want). -->
-                                        <TextBlock Text="{Binding DisplayText}">
-                                            <TextBlock.Style>
-                                                <Style TargetType="TextBlock">
-                                                    <Style.Triggers>
-                                                        <!-- Bold the installed version, but only while
-                                                         the dropdown is expanded - inside the closed
-                                                         selection box there's no ComboBoxItem ancestor,
-                                                         so this trigger doesn't fire and the collapsed
-                                                         text stays at the default weight. -->
-                                                        <MultiDataTrigger>
-                                                            <MultiDataTrigger.Conditions>
-                                                                <Condition Binding="{Binding IsInstalled}" Value="True" />
-                                                                <Condition Binding="{Binding RelativeSource={RelativeSource AncestorType=ComboBoxItem}, Path=IsVisible, FallbackValue=False}" Value="True" />
-                                                            </MultiDataTrigger.Conditions>
-                                                            <Setter Property="FontWeight" Value="Bold" />
-                                                        </MultiDataTrigger>
-                                                    </Style.Triggers>
-                                                </Style>
-                                            </TextBlock.Style>
-                                        </TextBlock>
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="{Binding DisplayText}" VerticalAlignment="Center">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Style.Triggers>
+                                                            <!-- Bold the installed version, but only while
+                                                             the dropdown is expanded - inside the closed
+                                                             selection box there's no ComboBoxItem ancestor,
+                                                             so this trigger doesn't fire and the collapsed
+                                                             text stays at the default weight. -->
+                                                            <MultiDataTrigger>
+                                                                <MultiDataTrigger.Conditions>
+                                                                    <Condition Binding="{Binding IsInstalled}" Value="True" />
+                                                                    <Condition Binding="{Binding RelativeSource={RelativeSource AncestorType=ComboBoxItem}, Path=IsVisible, FallbackValue=False}" Value="True" />
+                                                                </MultiDataTrigger.Conditions>
+                                                                <Setter Property="FontWeight" Value="Bold" />
+                                                            </MultiDataTrigger>
+                                                            <!-- Strike through deprecated versions, the way the
+                                                             built-in NuGet Package Manager does, with the reason
+                                                             surfaced as a tooltip. -->
+                                                            <DataTrigger Binding="{Binding IsDeprecated}" Value="True">
+                                                                <Setter Property="TextDecorations" Value="Strikethrough" />
+                                                                <Setter Property="ToolTip" Value="{Binding DeprecationTooltip}" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                            <!-- Per-version status flag, matching what the built-in
+                                             NuGet Package Manager shows in its version list. -->
+                                            <imaging:CrispImage Width="12" Height="12" Margin="6,0,0,0"
+                                                                VerticalAlignment="Center"
+                                                                Moniker="{x:Static catalog:KnownMonikers.StatusSecurityWarning}"
+                                                                ToolTip="This version has known vulnerabilities"
+                                                                Visibility="{Binding IsVulnerable, Converter={StaticResource BoolToVis}}" />
+                                        </StackPanel>
                                     </DataTemplate>
                                 </ComboBox.ItemTemplate>
                             </ComboBox>

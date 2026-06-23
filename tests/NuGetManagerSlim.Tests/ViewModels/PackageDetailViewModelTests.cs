@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Moq;
@@ -20,7 +21,7 @@ namespace NuGetManagerSlim.Tests.ViewModels
             var statusLog = new List<string>();
 
             feedMock.Setup(f => f.GetVersionsAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new List<NuGetVersion> { NuGetVersion.Parse("2.0.0"), NuGetVersion.Parse("1.0.0") });
+                .ReturnsAsync(new List<PackageVersionInfo> { new(NuGetVersion.Parse("2.0.0")), new(NuGetVersion.Parse("1.0.0")) });
 
             feedMock.Setup(f => f.GetPackageMetadataAsync(It.IsAny<string>(), It.IsAny<NuGetVersion>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new PackageModel
@@ -78,6 +79,32 @@ namespace NuGetManagerSlim.Tests.ViewModels
             var row = MakeRow(installed: "1.0.0");
             await vm.LoadAsync(row, new ProjectScopeModel { DisplayName = "MyApp", ProjectFullPath = @"C:\x\x.csproj" }, false, CancellationToken.None);
             Assert.Equal(NuGetVersion.Parse("1.0.0"), vm.SelectedVersion);
+        }
+
+        [Fact]
+        public async Task LoadAsync_FlagsDeprecatedAndVulnerableVersions()
+        {
+            var feedMock = new Mock<INuGetFeedService>();
+            var projMock = new Mock<IProjectService>();
+            feedMock.Setup(f => f.GetVersionsAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<PackageVersionInfo>
+                {
+                    new(NuGetVersion.Parse("2.0.0"), isVulnerable: true),
+                    new(NuGetVersion.Parse("1.0.0"), isDeprecated: true, deprecationReason: "Legacy"),
+                });
+            feedMock.Setup(f => f.GetPackageMetadataAsync(It.IsAny<string>(), It.IsAny<NuGetVersion>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new PackageModel { PackageId = "TestPkg" });
+            var vm = new PackageDetailViewModel(feedMock.Object, projMock.Object, _ => { });
+
+            await vm.LoadAsync(MakeRow(installed: null), new ProjectScopeModel { DisplayName = "MyApp", ProjectFullPath = @"C:\x\x.csproj" }, false, CancellationToken.None);
+
+            var v200 = vm.AvailableVersions.Single(i => i.Version == NuGetVersion.Parse("2.0.0"));
+            var v100 = vm.AvailableVersions.Single(i => i.Version == NuGetVersion.Parse("1.0.0"));
+            Assert.True(v200.IsVulnerable);
+            Assert.False(v200.IsDeprecated);
+            Assert.True(v100.IsDeprecated);
+            Assert.False(v100.IsVulnerable);
+            Assert.Equal("This version is deprecated: Legacy", v100.DeprecationTooltip);
         }
 
         [Fact]
@@ -189,7 +216,7 @@ namespace NuGetManagerSlim.Tests.ViewModels
             var projMock = new Mock<IProjectService>();
 
             feedMock.Setup(f => f.GetVersionsAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new List<NuGetVersion> { NuGetVersion.Parse("1.0.0") });
+                .ReturnsAsync(new List<PackageVersionInfo> { new(NuGetVersion.Parse("1.0.0")) });
             feedMock.Setup(f => f.GetPackageMetadataAsync(It.IsAny<string>(), It.IsAny<NuGetVersion>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new PackageModel { PackageId = "TestPkg", DownloadCount = 0 });
 
@@ -206,7 +233,7 @@ namespace NuGetManagerSlim.Tests.ViewModels
             var projMock = new Mock<IProjectService>();
 
             feedMock.Setup(f => f.GetVersionsAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new List<NuGetVersion> { NuGetVersion.Parse("1.0.0") });
+                .ReturnsAsync(new List<PackageVersionInfo> { new(NuGetVersion.Parse("1.0.0")) });
             feedMock.Setup(f => f.GetPackageMetadataAsync(It.IsAny<string>(), It.IsAny<NuGetVersion>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new PackageModel { PackageId = "TestPkg", DownloadCount = 2_000_000_000 });
 
@@ -223,7 +250,7 @@ namespace NuGetManagerSlim.Tests.ViewModels
             var projMock = new Mock<IProjectService>();
 
             feedMock.Setup(f => f.GetVersionsAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new List<NuGetVersion> { NuGetVersion.Parse("1.0.0") });
+                .ReturnsAsync(new List<PackageVersionInfo> { new(NuGetVersion.Parse("1.0.0")) });
             feedMock.Setup(f => f.GetPackageMetadataAsync(It.IsAny<string>(), It.IsAny<NuGetVersion>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new PackageModel { PackageId = "TestPkg", DownloadCount = 7_500 });
 
@@ -240,7 +267,7 @@ namespace NuGetManagerSlim.Tests.ViewModels
             var projMock = new Mock<IProjectService>();
 
             feedMock.Setup(f => f.GetVersionsAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new List<NuGetVersion> { NuGetVersion.Parse("1.0.0") });
+                .ReturnsAsync(new List<PackageVersionInfo> { new(NuGetVersion.Parse("1.0.0")) });
             feedMock.Setup(f => f.GetPackageMetadataAsync(It.IsAny<string>(), It.IsAny<NuGetVersion>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new PackageModel
                 {
@@ -269,7 +296,7 @@ namespace NuGetManagerSlim.Tests.ViewModels
             var published = new System.DateTimeOffset(2023, 6, 15, 0, 0, 0, System.TimeSpan.Zero);
 
             feedMock.Setup(f => f.GetVersionsAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new List<NuGetVersion> { NuGetVersion.Parse("1.0.0") });
+                .ReturnsAsync(new List<PackageVersionInfo> { new(NuGetVersion.Parse("1.0.0")) });
             feedMock.Setup(f => f.GetPackageMetadataAsync(It.IsAny<string>(), It.IsAny<NuGetVersion>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new PackageModel { PackageId = "TestPkg", DownloadCount = 1, Published = published });
 
@@ -287,7 +314,7 @@ namespace NuGetManagerSlim.Tests.ViewModels
             var projMock = new Mock<IProjectService>();
 
             feedMock.Setup(f => f.GetVersionsAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new List<NuGetVersion> { NuGetVersion.Parse("1.0.0") });
+                .ReturnsAsync(new List<PackageVersionInfo> { new(NuGetVersion.Parse("1.0.0")) });
             feedMock.Setup(f => f.GetPackageMetadataAsync(It.IsAny<string>(), It.IsAny<NuGetVersion>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new PackageModel { PackageId = "TestPkg", DownloadCount = 1, ProjectUrl = "https://example.com" });
 

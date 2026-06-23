@@ -45,7 +45,7 @@ namespace NuGetManagerSlim.Services
             NuGetVersion version,
             CancellationToken cancellationToken);
 
-        Task<IReadOnlyList<NuGetVersion>> GetVersionsAsync(
+        Task<IReadOnlyList<PackageVersionInfo>> GetVersionsAsync(
             string packageId,
             bool includePrerelease,
             CancellationToken cancellationToken);
