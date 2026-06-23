@@ -591,5 +591,55 @@ namespace NuGetManagerSlim.Tests.ViewModels
             Assert.True(vm.HasUpdate);
             Assert.Equal("v1.0.0 → v2.0.0", vm.VersionInformation);
         }
+
+        [Fact]
+        public void IsDeprecated_WhenModelNotDeprecated_ReturnsFalse()
+        {
+            var vm = MakeRow(installed: "1.0.0");
+            Assert.False(vm.IsDeprecated);
+        }
+
+        [Fact]
+        public void IsDeprecated_WhenModelDeprecated_ReturnsTrueWithReasonTooltip()
+        {
+            var vm = new PackageRowViewModel(new PackageModel
+            {
+                PackageId = "Pkg",
+                InstalledVersion = NuGetVersion.Parse("1.0.0"),
+                IsDeprecated = true,
+                DeprecationReason = "Legacy, Other",
+            });
+            Assert.True(vm.IsDeprecated);
+            Assert.Contains("Legacy, Other", vm.DeprecationTooltip);
+        }
+
+        [Fact]
+        public void DeprecationTooltip_WhenNoReason_UsesGenericMessage()
+        {
+            var vm = new PackageRowViewModel(new PackageModel
+            {
+                PackageId = "Pkg",
+                InstalledVersion = NuGetVersion.Parse("1.0.0"),
+                IsDeprecated = true,
+            });
+            Assert.Equal("This package is deprecated", vm.DeprecationTooltip);
+        }
+
+        [Fact]
+        public void ApplyMetadata_PromotesRowToDeprecated()
+        {
+            var vm = MakeRow(installed: "1.0.0");
+            Assert.False(vm.IsDeprecated);
+
+            vm.ApplyMetadata(new PackageModel
+            {
+                PackageId = "TestPkg",
+                IsDeprecated = true,
+                DeprecationReason = "Critical bug",
+            });
+
+            Assert.True(vm.IsDeprecated);
+            Assert.Contains("Critical bug", vm.DeprecationTooltip);
+        }
     }
 }

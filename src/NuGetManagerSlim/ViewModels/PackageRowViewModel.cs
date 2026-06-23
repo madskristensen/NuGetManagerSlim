@@ -66,6 +66,9 @@ namespace NuGetManagerSlim.ViewModels
                 IconUrl = _iconUrlOverride ?? metadata.IconUrl,
                 PerFrameworkVersions = _model.PerFrameworkVersions,
                 Dependencies = _model.Dependencies,
+                Vulnerabilities = _model.Vulnerabilities,
+                IsDeprecated = _model.IsDeprecated || metadata.IsDeprecated,
+                DeprecationReason = _model.DeprecationReason ?? metadata.DeprecationReason,
                 AllowedVersionRange = _model.AllowedVersionRange,
             };
             OnPropertyChanged(nameof(AuthorDisplay));
@@ -74,6 +77,8 @@ namespace NuGetManagerSlim.ViewModels
             OnPropertyChanged(nameof(VersionInformation));
             OnPropertyChanged(nameof(UpdateBadge));
             OnPropertyChanged(nameof(DownloadCountDisplay));
+            OnPropertyChanged(nameof(IsDeprecated));
+            OnPropertyChanged(nameof(DeprecationTooltip));
         }
 
         public string PackageId => _model.PackageId;
@@ -247,6 +252,15 @@ namespace NuGetManagerSlim.ViewModels
             OnPropertyChanged(nameof(VulnerabilityBadge));
             OnPropertyChanged(nameof(VulnerabilityTooltip));
         }
+
+        // The deprecated state the feed reports for the displayed version. Drives
+        // a strikethrough on the package name in every list view, matching the
+        // built-in NuGet Package Manager (issue #20).
+        public bool IsDeprecated => _model.IsDeprecated;
+
+        public string DeprecationTooltip => string.IsNullOrEmpty(_model.DeprecationReason)
+            ? "This package is deprecated"
+            : $"This package is deprecated: {_model.DeprecationReason}";
 
         public string UpdateButtonAccessibleName => $"Update {PackageId} to {LatestStableVersion}";
 

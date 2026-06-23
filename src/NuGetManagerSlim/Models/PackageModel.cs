@@ -32,6 +32,13 @@ namespace NuGetManagerSlim.Models
 
         public bool HasVulnerabilities => Vulnerabilities.Count > 0;
 
+        // Package-level deprecation status, read from the feed's registration
+        // metadata for the displayed version. Mirrors what the built-in NuGet
+        // Package Manager shows so deprecated packages can be flagged in every
+        // list view (issue #20).
+        public bool IsDeprecated { get; init; }
+        public string? DeprecationReason { get; init; }
+
         // Version range constraint declared in the project file (e.g. allowedVersions
         // in packages.config, or a range-syntax Version in PackageReference).
         // When set, only updates that satisfy this range should be offered.
@@ -58,6 +65,8 @@ namespace NuGetManagerSlim.Models
             PerFrameworkVersions = PerFrameworkVersions,
             Dependencies = Dependencies,
             Vulnerabilities = Vulnerabilities,
+            IsDeprecated = IsDeprecated,
+            DeprecationReason = DeprecationReason,
             AllowedVersionRange = range,
         };
     }

@@ -720,6 +720,8 @@ namespace NuGetManagerSlim.Services
                     catch { /* search fallback is best-effort */ }
                 }
 
+                var (isDeprecated, deprecationReason) = await MapDeprecationAsync(latest).ConfigureAwait(false);
+
                 return SourceMetadataOutcome.Hit(new PackageModel
                 {
                     PackageId = latest.Identity.Id,
@@ -736,6 +738,8 @@ namespace NuGetManagerSlim.Services
                     Published = latest.Published,
                     Dependencies = deps,
                     Vulnerabilities = MapVulnerabilities(latest),
+                    IsDeprecated = isDeprecated,
+                    DeprecationReason = deprecationReason,
                 });
             }
             catch (OperationCanceledException)
@@ -774,6 +778,31 @@ namespace NuGetManagerSlim.Services
                 });
             }
             return list;
+        }
+
+        // Reads the feed's deprecation metadata for the displayed version so a
+        // deprecated package can be flagged in every list view (issue #20). The
+        // lookup is best-effort: a failure or a feed that doesn't expose
+        // deprecation data simply leaves the package unflagged.
+        private static async Task<(bool IsDeprecated, string? Reason)> MapDeprecationAsync(IPackageSearchMetadata metadata)
+        {
+            try
+            {
+                var deprecation = await metadata.GetDeprecationMetadataAsync().ConfigureAwait(false);
+                if (deprecation != null)
+                {
+                    var reason = deprecation.Reasons != null && deprecation.Reasons.Any()
+                        ? string.Join(", ", deprecation.Reasons)
+                        : deprecation.Message;
+                    return (true, reason);
+                }
+            }
+            catch (OperationCanceledException) { throw; }
+            catch
+            {
+                // Deprecation lookup is best-effort.
+            }
+            return (false, null);
         }
 
         public async Task<PackageModel?> GetPackageMetadataAsync(
@@ -898,6 +927,8 @@ namespace NuGetManagerSlim.Services
                     catch { /* search fallback is best-effort */ }
                 }
 
+                var (isDeprecated, deprecationReason) = await MapDeprecationAsync(meta).ConfigureAwait(false);
+
                 return SourceMetadataOutcome.Hit(new PackageModel
                 {
                     PackageId = meta.Identity.Id,
@@ -913,6 +944,8 @@ namespace NuGetManagerSlim.Services
                     IconUrl = meta.IconUrl?.ToString(),
                     Dependencies = deps,
                     Vulnerabilities = MapVulnerabilities(meta),
+                    IsDeprecated = isDeprecated,
+                    DeprecationReason = deprecationReason,
                 });
             }
             catch (OperationCanceledException) { throw; }

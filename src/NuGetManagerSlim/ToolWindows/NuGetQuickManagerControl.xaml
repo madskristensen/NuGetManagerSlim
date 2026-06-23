@@ -394,7 +394,21 @@
                             <StackPanel Grid.Column="1" Grid.Row="0" Orientation="Horizontal" Margin="8,0,0,0">
                                 <TextBlock Text="{Binding PackageId}" FontSize="12"
                                            TextTrimming="CharacterEllipsis"
-                                           VerticalAlignment="Center" />
+                                           VerticalAlignment="Center">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Style.Triggers>
+                                                <!-- Deprecated packages are struck through and explained
+                                                     via a tooltip, mirroring the built-in NuGet Package
+                                                     Manager so the status shows in every list view (issue #20). -->
+                                                <DataTrigger Binding="{Binding IsDeprecated}" Value="True">
+                                                    <Setter Property="TextDecorations" Value="Strikethrough" />
+                                                    <Setter Property="ToolTip" Value="{Binding DeprecationTooltip}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
                                 <Border Style="{StaticResource InstalledPillStyle}"
                                         ToolTip="This package is installed in the current project">
                                     <TextBlock Text="Installed"
