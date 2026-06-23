@@ -549,6 +549,35 @@ namespace NuGetManagerSlim.Services
             return result;
         }
 
+        public async Task<InstalledEnrichment?> GetInstalledEnrichmentAsync(
+            string packageId,
+            NuGetVersion? installedVersion,
+            bool needsDownloadCount,
+            CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrEmpty(packageId)) return null;
+
+            // When the caller only needs the "latest" half (no installed version
+            // to resolve advisories for), reuse the warm latest-metadata cache so
+            // a repeat enrichment pass stays a no-op round trip.
+            if (installedVersion == null && TryGetCachedLatestMetadata(packageId, out var cachedLatest))
+                return new InstalledEnrichment { Latest = cachedLatest };
+
+            var (result, anySourceFaulted) = await GetInstalledEnrichmentCoreAsync(
+                packageId, installedVersion, needsDownloadCount, cancellationToken).ConfigureAwait(false);
+
+            // Seed the shared latest-metadata cache so the Updates view's
+            // TryGetCachedLatestMetadata fast-path and any later latest-only
+            // enrichment benefit from this single fetch.
+            if (!cancellationToken.IsCancellationRequested
+                && ShouldCacheMetadataResult(result?.Latest, anySourceFaulted))
+            {
+                StoreMetadata("latest:" + packageId, result?.Latest);
+            }
+
+            return result;
+        }
+
         public bool TryGetCachedLatestMetadata(string packageId, out PackageModel? metadata)
         {
             metadata = null;
@@ -751,6 +780,191 @@ namespace NuGetManagerSlim.Services
                 // Source failed (transient network/proxy/credential error). Signal
                 // the fault so the caller won't cache a misleading negative result.
                 return SourceMetadataOutcome.Faulted;
+            }
+        }
+
+        private readonly struct InstalledEnrichmentOutcome
+        {
+            private InstalledEnrichmentOutcome(
+                PackageModel? latest,
+                IReadOnlyList<PackageVulnerabilityInfo> installedVulnerabilities,
+                SourceMetadataStatus status)
+            {
+                Latest = latest;
+                InstalledVulnerabilities = installedVulnerabilities;
+                Status = status;
+            }
+
+            public PackageModel? Latest { get; }
+            public IReadOnlyList<PackageVulnerabilityInfo> InstalledVulnerabilities { get; }
+            public SourceMetadataStatus Status { get; }
+
+            public static readonly InstalledEnrichmentOutcome NotFound = new(null, [], SourceMetadataStatus.NotFound);
+            public static readonly InstalledEnrichmentOutcome Faulted = new(null, [], SourceMetadataStatus.Faulted);
+            public static InstalledEnrichmentOutcome Found(
+                PackageModel? latest, IReadOnlyList<PackageVulnerabilityInfo> installedVulnerabilities)
+                => new(latest, installedVulnerabilities, SourceMetadataStatus.Found);
+        }
+
+        private async Task<(InstalledEnrichment? Value, bool AnySourceFaulted)> GetInstalledEnrichmentCoreAsync(
+            string packageId,
+            NuGetVersion? installedVersion,
+            bool needsDownloadCount,
+            CancellationToken cancellationToken)
+        {
+            var sources = GetEnabledSources();
+            if (sources.Count == 0) return (null, false);
+
+            // Fan out across enabled sources in parallel and take the first source
+            // that actually hosts the package - matching the latest-metadata path -
+            // so a slow source listed first can't stall enrichment.
+            using var perCallCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            var token = perCallCts.Token;
+            var tasks = sources
+                .Select(src => FetchInstalledEnrichmentFromSourceAsync(
+                    src, packageId, installedVersion, needsDownloadCount, token))
+                .ToList();
+
+            var anyFaulted = false;
+            try
+            {
+                while (tasks.Count > 0)
+                {
+                    var done = await Task.WhenAny(tasks).ConfigureAwait(false);
+                    tasks.Remove(done);
+                    if (done.Status != TaskStatus.RanToCompletion) continue;
+                    var outcome = done.Result;
+                    if (outcome.Status == SourceMetadataStatus.Found)
+                    {
+                        perCallCts.Cancel();
+                        return (new InstalledEnrichment
+                        {
+                            Latest = outcome.Latest,
+                            InstalledVulnerabilities = outcome.InstalledVulnerabilities,
+                        }, anyFaulted);
+                    }
+                    if (outcome.Status == SourceMetadataStatus.Faulted) anyFaulted = true;
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+
+            return (null, anyFaulted);
+        }
+
+        private async Task<InstalledEnrichmentOutcome> FetchInstalledEnrichmentFromSourceAsync(
+            PackageSourceModel source,
+            string packageId,
+            NuGetVersion? installedVersion,
+            bool needsDownloadCount,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                var resource = await GetMetadataResourceAsync(source, cancellationToken).ConfigureAwait(false);
+                if (resource == null) return InstalledEnrichmentOutcome.NotFound;
+
+                // Single registration fetch covering every version. includeUnlisted
+                // is true so an unlisted *installed* version can still resolve its
+                // advisories; the "latest" computation below filters back to listed
+                // entries so an unlisted version is never reported as the latest.
+                var allMetadata = (await resource.GetMetadataAsync(
+                    packageId, includePrerelease: true, includeUnlisted: true,
+                    _cacheContext, _logger, cancellationToken).ConfigureAwait(false))?.ToList();
+
+                if (allMetadata == null || allMetadata.Count == 0) return InstalledEnrichmentOutcome.NotFound;
+
+                // Installed-version advisories come from the full (listed +
+                // unlisted) set so they mirror the dedicated versioned lookup.
+                IReadOnlyList<PackageVulnerabilityInfo> installedVulnerabilities = [];
+                if (installedVersion != null)
+                {
+                    var installedMeta = allMetadata.FirstOrDefault(
+                        m => m?.Identity?.Version != null && m.Identity.Version.Equals(installedVersion));
+                    if (installedMeta != null)
+                        installedVulnerabilities = MapVulnerabilities(installedMeta);
+                }
+
+                // Latest metadata is derived from listed entries only, matching the
+                // includeUnlisted:false latest-metadata path exactly.
+                var listed = allMetadata.Where(m => m.IsListed).ToList();
+                if (listed.Count == 0)
+                {
+                    // Package exists here but has no listed version: report Found
+                    // (so the fan-out stops) with no "latest", but still surface any
+                    // installed-version advisories we resolved above.
+                    return InstalledEnrichmentOutcome.Found(null, installedVulnerabilities);
+                }
+
+                var latest = listed.OrderByDescending(m => m.Identity.Version).First();
+                var (latestStable, latestPrerelease) = SelectLatestVersions(
+                    listed.Select(m => m.Identity.Version));
+
+                var deps = latest.DependencySets
+                    .SelectMany(ds => ds.Packages.Select(p => new PackageDependencyInfo
+                    {
+                        PackageId = p.Id,
+                        VersionRange = p.VersionRange?.ToString() ?? "*",
+                        TargetFramework = ds.TargetFramework?.GetShortFolderName() ?? string.Empty,
+                    }))
+                    .ToList();
+
+                // Same nuget.org-only download-count fallback as the latest path,
+                // but skipped entirely when the caller already has a count for the
+                // row - that removes a redundant per-package search round trip.
+                long downloadCount = latest.DownloadCount ?? 0;
+                if (needsDownloadCount && downloadCount == 0 && IsNuGetOrgSource(source))
+                {
+                    try
+                    {
+                        var searchResource = await GetSearchResourceAsync(source, cancellationToken).ConfigureAwait(false);
+                        if (searchResource != null)
+                        {
+                            var hits = await searchResource.SearchAsync(
+                                "packageid:" + packageId,
+                                new SearchFilter(includePrerelease: true),
+                                0, 1, _logger, cancellationToken).ConfigureAwait(false);
+                            var hit = hits?.FirstOrDefault();
+                            if (hit?.DownloadCount != null) downloadCount = hit.DownloadCount.Value;
+                        }
+                    }
+                    catch (OperationCanceledException) { throw; }
+                    catch { /* search fallback is best-effort */ }
+                }
+
+                var (isDeprecated, deprecationReason) = await MapDeprecationAsync(latest).ConfigureAwait(false);
+
+                var latestModel = new PackageModel
+                {
+                    PackageId = latest.Identity.Id,
+                    LatestStableVersion = latestStable,
+                    LatestPrereleaseVersion = latestPrerelease,
+                    Description = latest.Description,
+                    Authors = latest.Authors,
+                    LicenseExpression = latest.LicenseMetadata?.License,
+                    LicenseUrl = latest.LicenseUrl?.ToString(),
+                    DownloadCount = downloadCount,
+                    SourceName = source.Name,
+                    ProjectUrl = latest.ProjectUrl?.ToString(),
+                    IconUrl = latest.IconUrl?.ToString(),
+                    Published = latest.Published,
+                    Dependencies = deps,
+                    Vulnerabilities = MapVulnerabilities(latest),
+                    IsDeprecated = isDeprecated,
+                    DeprecationReason = deprecationReason,
+                };
+
+                return InstalledEnrichmentOutcome.Found(latestModel, installedVulnerabilities);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                return InstalledEnrichmentOutcome.Faulted;
             }
         }
 

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using NuGet.Versioning;
@@ -61,6 +62,7 @@ namespace NuGetManagerSlim.ViewModels
                 SourceName = _model.SourceName,
                 IsTransitive = _model.IsTransitive,
                 RequiredByPackageId = _model.RequiredByPackageId,
+                RequiredByPackageIds = _model.RequiredByPackageIds,
                 ReadmeUrl = _model.ReadmeUrl ?? metadata.ReadmeUrl,
                 ProjectUrl = _model.ProjectUrl ?? metadata.ProjectUrl,
                 IconUrl = _iconUrlOverride ?? metadata.IconUrl,
@@ -190,9 +192,15 @@ namespace NuGetManagerSlim.ViewModels
 
         public string SourceBadge => string.IsNullOrEmpty(_model.SourceName) ? string.Empty : $"⊕ {_model.SourceName}";
 
-        public string RequiredByDisplay => _model.IsTransitive && !string.IsNullOrEmpty(_model.RequiredByPackageId)
-            ? $"required by: {_model.RequiredByPackageId}"
-            : string.Empty;
+        // Every direct package that pulls in this transitive dependency. Empty
+        // for direct/non-transitive packages.
+        public IReadOnlyList<string> RequiredByPackageIds => _model.RequiredByPackageIds;
+
+        public string RequiredByDisplay => _model.IsTransitive && _model.RequiredByPackageIds.Count > 0
+            ? $"required by: {string.Join(", ", _model.RequiredByPackageIds)}"
+            : (_model.IsTransitive && !string.IsNullOrEmpty(_model.RequiredByPackageId)
+                ? $"required by: {_model.RequiredByPackageId}"
+                : string.Empty);
 
         // Vulnerability metadata is fetched lazily for the installed version, so
         // it may arrive after the row is created. ApplyVulnerabilities overrides

@@ -18,6 +18,12 @@ namespace NuGetManagerSlim.Models
         public string? SourceName { get; init; }
         public bool IsTransitive { get; init; }
         public string? RequiredByPackageId { get; init; }
+
+        // Every direct (top-level) package that pulls in this transitive
+        // dependency, mirroring the "required by" tooltip in the built-in NuGet
+        // Package Manager (issue #19). RequiredByPackageId remains the first of
+        // these for callers that only need a single ancestor.
+        public IReadOnlyList<string> RequiredByPackageIds { get; init; } = [];
         public string? ReadmeUrl { get; init; }
         public string? ProjectUrl { get; init; }
         public string? IconUrl { get; init; }
@@ -58,6 +64,7 @@ namespace NuGetManagerSlim.Models
             SourceName = SourceName,
             IsTransitive = IsTransitive,
             RequiredByPackageId = RequiredByPackageId,
+            RequiredByPackageIds = RequiredByPackageIds,
             ReadmeUrl = ReadmeUrl,
             ProjectUrl = ProjectUrl,
             IconUrl = IconUrl,
@@ -68,6 +75,36 @@ namespace NuGetManagerSlim.Models
             IsDeprecated = IsDeprecated,
             DeprecationReason = DeprecationReason,
             AllowedVersionRange = range,
+        };
+
+        // Returns a copy carrying the given set of direct ancestors. Used when
+        // the same transitive package is aggregated across projects and the
+        // union of "required by" packages must be preserved.
+        internal PackageModel WithRequiredBy(IReadOnlyList<string> requiredByPackageIds) => new PackageModel
+        {
+            PackageId = PackageId,
+            InstalledVersion = InstalledVersion,
+            LatestStableVersion = LatestStableVersion,
+            LatestPrereleaseVersion = LatestPrereleaseVersion,
+            Description = Description,
+            Authors = Authors,
+            LicenseExpression = LicenseExpression,
+            LicenseUrl = LicenseUrl,
+            DownloadCount = DownloadCount,
+            SourceName = SourceName,
+            IsTransitive = IsTransitive,
+            RequiredByPackageId = requiredByPackageIds.Count > 0 ? requiredByPackageIds[0] : RequiredByPackageId,
+            RequiredByPackageIds = requiredByPackageIds,
+            ReadmeUrl = ReadmeUrl,
+            ProjectUrl = ProjectUrl,
+            IconUrl = IconUrl,
+            Published = Published,
+            PerFrameworkVersions = PerFrameworkVersions,
+            Dependencies = Dependencies,
+            Vulnerabilities = Vulnerabilities,
+            IsDeprecated = IsDeprecated,
+            DeprecationReason = DeprecationReason,
+            AllowedVersionRange = AllowedVersionRange,
         };
     }
 

@@ -421,6 +421,14 @@
                                            Visibility="{Binding IsPrerelease, Converter={StaticResource BoolToVis}}" />
                                 <TextBlock Text="{Binding VersionInformation}" FontSize="9" FontWeight="SemiBold"
                                            Margin="6,0,0,0" VerticalAlignment="Center" />
+                                <!-- Vulnerability flag shown next to the title (issue #20). Icon
+                                     only, with the severity and advisory list surfaced as a tooltip,
+                                     so the row stays compact and aligned. -->
+                                <imaging:CrispImage Width="14" Height="14" Margin="6,0,0,0"
+                                                    VerticalAlignment="Center"
+                                                    Moniker="{x:Static catalog:KnownMonikers.StatusSecurityWarning}"
+                                                    ToolTip="{Binding VulnerabilityTooltip}"
+                                                    Visibility="{Binding HasVulnerabilities, Converter={StaticResource BoolToVis}}" />
                             </StackPanel>
 
                             <!-- Downloads + author. The update arrow icon in the action area
@@ -432,12 +440,12 @@
                                            Style="{StaticResource MutedTextStyle}" />
                                 <TextBlock Text="{Binding AuthorDisplay}"
                                            Style="{StaticResource MutedTextStyle}" Margin="6,0,0,0" />
-                                <TextBlock Text="{Binding VulnerabilityBadge}"
-                                           FontSize="10" FontWeight="SemiBold"
-                                           VerticalAlignment="Center" Margin="6,0,0,0"
-                                           Foreground="#D13438"
-                                           ToolTip="{Binding VulnerabilityTooltip}"
-                                           Visibility="{Binding HasVulnerabilities, Converter={StaticResource BoolToVis}}" />
+                                <TextBlock Text="{Binding RequiredByDisplay}"
+                                           Style="{StaticResource MutedTextStyle}" Margin="6,0,0,0"
+                                           VerticalAlignment="Center"
+                                           TextTrimming="CharacterEllipsis"
+                                           ToolTip="{Binding RequiredByDisplay}"
+                                           Visibility="{Binding IsTransitive, Converter={StaticResource BoolToVis}}" />
                             </StackPanel>
 
                             <!-- Quick action area. The update button is always visible when an
@@ -842,6 +850,28 @@
                                 Visibility="{Binding Detail.CanUpdateAllProjects, Converter={StaticResource BoolToVis}}"
                                 AutomationProperties.Name="Update package in all projects" />
                         </WrapPanel>
+
+                        <!-- Direct packages that pull in this transitive dependency (issue #19) -->
+                        <Expander Header="Required by"
+                                  IsExpanded="True"
+                                  Margin="0,0,0,4"
+                                  Visibility="{Binding Detail.HasRequiredByPackages, Converter={StaticResource BoolToVis}}">
+                            <ItemsControl ItemsSource="{Binding Detail.RequiredByPackages}" Margin="12,2,0,4">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Orientation="Horizontal" Margin="0,1">
+                                            <imaging:CrispImage Width="14" Height="14"
+                                                                Moniker="{x:Static catalog:KnownMonikers.NuGet}"
+                                                                VerticalAlignment="Center" />
+                                            <TextBlock Text="{Binding}"
+                                                       Style="{StaticResource MutedTextStyle}"
+                                                       Margin="6,0,0,0"
+                                                       VerticalAlignment="Center" />
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </Expander>
 
                         <!-- Dependency tree (grouped by target framework) -->
                         <Expander Header="Dependencies" IsExpanded="False">

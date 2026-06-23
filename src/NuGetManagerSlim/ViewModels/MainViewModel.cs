@@ -552,7 +552,7 @@ namespace NuGetManagerSlim.ViewModels
                             .Where(r => r.IsInstalled && r.LatestStableVersion == null)
                             .ToList();
                         if (needsEnrichCache.Count > 0)
-                            EnrichInstalledMetadataInBackground(needsEnrichCache, ReplaceCts(ref _enrichCts));
+                            EnrichInstalledInBackground(needsEnrichCache, ReplaceCts(ref _enrichCts));
                         return;
                     }
 
@@ -582,7 +582,7 @@ namespace NuGetManagerSlim.ViewModels
                         .Where(r => r.IsInstalled && r.LatestStableVersion == null)
                         .ToList();
                     if (needsEnrich.Count > 0)
-                        EnrichInstalledMetadataInBackground(needsEnrich, ReplaceCts(ref _enrichCts));
+                        EnrichInstalledInBackground(needsEnrich, ReplaceCts(ref _enrichCts));
                 }
                 else
                 {
@@ -737,7 +737,11 @@ namespace NuGetManagerSlim.ViewModels
                     // direct enrichment, which previously left rows with
                     // half-populated metadata when switching view modes (issue #13).
                     var enrichToken = ReplaceCts(ref _enrichCts);
-                    EnrichInstalledMetadataInBackground(Packages.ToList(), enrichToken);
+
+                    // One consolidated pass resolves both the latest-version
+                    // metadata and the installed version's vulnerability badges
+                    // (issue #20) from a single registration fetch per package.
+                    EnrichInstalledInBackground(Packages.ToList(), enrichToken);
 
                     // Transitive packages are read from project.assets.json which
                     // can be slow on first cold restore. Kick the load off in the
@@ -820,7 +824,14 @@ namespace NuGetManagerSlim.ViewModels
             catch (OperationCanceledException) { }
         }
 
-        private void EnrichInstalledMetadataInBackground(IReadOnlyList<PackageRowViewModel> rows, CancellationToken ct)
+        // Resolves the latest-version metadata (update badge, deprecation, display
+        // fields) and the *installed* version's vulnerability advisories for rows in
+        // the Installed/Browse views in a single pass. Folding both concerns into
+        // one fetch means each package costs one registration round trip instead of
+        // two. Surfacing the installed-version advisories here keeps the badge
+        // visible in every list view, not just the dedicated Vulnerable view
+        // (issue #20).
+        private void EnrichInstalledInBackground(IReadOnlyList<PackageRowViewModel> rows, CancellationToken ct)
         {
             _ = Task.Run(async () =>
             {
@@ -830,9 +841,21 @@ namespace NuGetManagerSlim.ViewModels
                     await s_enrichmentThrottle.WaitAsync(ct).ConfigureAwait(false);
                     try
                     {
-                        var meta = await _feedService.GetPackageMetadataAsync(row.PackageId, ct).ConfigureAwait(false);
-                        if (meta == null || ct.IsCancellationRequested) return;
-                        RunOnUI(() => row.ApplyMetadata(meta));
+                        // Skip the download-count search fallback when the row
+                        // already carries a count (e.g. from a Browse search); the
+                        // ApplyMetadata merge keeps the existing count anyway, so the
+                        // extra search would be pure waste.
+                        var needsDownloadCount = row.Model.DownloadCount <= 0;
+                        var enrichment = await _feedService.GetInstalledEnrichmentAsync(
+                            row.PackageId, row.InstalledVersion, needsDownloadCount, ct).ConfigureAwait(false);
+                        if (enrichment == null || ct.IsCancellationRequested) return;
+                        RunOnUI(() =>
+                        {
+                            if (enrichment.Latest != null)
+                                row.ApplyMetadata(enrichment.Latest);
+                            if (enrichment.InstalledVulnerabilities.Count > 0)
+                                row.ApplyVulnerabilities(enrichment.InstalledVulnerabilities);
+                        });
                     }
                     catch (OperationCanceledException) { }
                     catch (Exception ex) { await ex.LogAsync(); }
@@ -897,7 +920,7 @@ namespace NuGetManagerSlim.ViewModels
                     {
                         OnPropertyChanged(nameof(HasPackages));
                         OnPropertyChanged(nameof(IsEmptyState));
-                        EnrichInstalledMetadataInBackground(newRows, enrichToken);
+                        EnrichInstalledInBackground(newRows, enrichToken);
                     }
                 });
             }, ct);
@@ -1072,6 +1095,7 @@ namespace NuGetManagerSlim.ViewModels
                         SourceName = m.SourceName,
                         IsTransitive = false,
                         RequiredByPackageId = m.RequiredByPackageId,
+                        RequiredByPackageIds = m.RequiredByPackageIds,
                         ReadmeUrl = m.ReadmeUrl,
                         ProjectUrl = m.ProjectUrl,
                         IconUrl = m.IconUrl,

@@ -417,6 +417,19 @@ namespace NuGetManagerSlim.Services
                     byId[pkg.PackageId] = existing.WithAllowedVersionRange(pkg.AllowedVersionRange);
                 }
             }
+
+            // A transitive package can be pulled in by different direct packages in
+            // different projects, so union the "required by" sets across projects
+            // (issue #19). Applies to whichever entry was kept above.
+            if ((existing.RequiredByPackageIds.Count > 0 || pkg.RequiredByPackageIds.Count > 0))
+            {
+                var union = new SortedSet<string>(existing.RequiredByPackageIds, StringComparer.OrdinalIgnoreCase);
+                union.UnionWith(pkg.RequiredByPackageIds);
+                if (union.Count != byId[pkg.PackageId].RequiredByPackageIds.Count)
+                {
+                    byId[pkg.PackageId] = byId[pkg.PackageId].WithRequiredBy(new List<string>(union));
+                }
+            }
         }
 
         private async Task<IReadOnlyList<PackageModel>> ReadTransitivesForProjectAsync(
@@ -433,8 +446,19 @@ namespace NuGetManagerSlim.Services
 
             using var fs = new FileStream(assetsPath, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, useAsync: true);
             using var doc = await JsonDocument.ParseAsync(fs, default, cancellationToken).ConfigureAwait(false);
-            var root = doc.RootElement;
 
+            var projectName = Path.GetFileNameWithoutExtension(projectPath);
+            return ParseTransitivesFromAssets(doc.RootElement, projectName, cancellationToken);
+        }
+
+        // Builds the transitive-dependency list from a parsed project.assets.json
+        // root element. Kept free of file IO and VS dependencies so the graph and
+        // ancestor-resolution logic can be unit tested directly.
+        public static IReadOnlyList<PackageModel> ParseTransitivesFromAssets(
+            JsonElement root,
+            string projectName,
+            CancellationToken cancellationToken)
+        {
             var direct = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             if (root.TryGetProperty("project", out var projectEl)
                 && projectEl.TryGetProperty("frameworks", out var fws)
@@ -499,19 +523,19 @@ namespace NuGetManagerSlim.Services
                 }
             }
 
-            var projectName = Path.GetFileNameWithoutExtension(projectPath);
             var result = new List<PackageModel>(nodes.Count);
             foreach (var kvp in nodes)
             {
                 if (direct.Contains(kvp.Key)) continue;
                 cancellationToken.ThrowIfCancellationRequested();
-                var ancestor = FindDirectAncestor(kvp.Key, nodes, direct);
+                var ancestors = FindDirectAncestors(kvp.Key, nodes, direct);
                 result.Add(new PackageModel
                 {
                     PackageId = kvp.Value.Id,
                     InstalledVersion = kvp.Value.Version,
                     IsTransitive = true,
-                    RequiredByPackageId = ancestor,
+                    RequiredByPackageId = ancestors.Count > 0 ? ancestors[0] : null,
+                    RequiredByPackageIds = ancestors,
                     SourceName = projectName,
                 });
             }
@@ -526,14 +550,18 @@ namespace NuGetManagerSlim.Services
             public List<string> Parents { get; } = new();
         }
 
-        // BFS up the reverse-edge graph until we hit a node that the project
-        // declared directly. Returns null when the package somehow has no
-        // direct ancestor (shouldn't happen for a well-formed assets file).
-        private static string? FindDirectAncestor(
+        // BFS up the reverse-edge graph collecting every direct dependency that
+        // (transitively) pulls in this package, so the UI can show "required by:
+        // X, Y" like the built-in NuGet Package Manager (issue #19). Returns an
+        // empty list when the package somehow has no direct ancestor (shouldn't
+        // happen for a well-formed assets file). Ancestors are ordered
+        // alphabetically for stable display.
+        private static IReadOnlyList<string> FindDirectAncestors(
             string id,
             Dictionary<string, TransitiveNode> nodes,
             HashSet<string> direct)
         {
+            var ancestors = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
             var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { id };
             var queue = new Queue<string>();
             queue.Enqueue(id);
@@ -543,11 +571,15 @@ namespace NuGetManagerSlim.Services
                 if (!nodes.TryGetValue(cur, out var node)) continue;
                 foreach (var parent in node.Parents)
                 {
-                    if (direct.Contains(parent)) return parent;
+                    if (direct.Contains(parent))
+                    {
+                        ancestors.Add(parent);
+                        continue;
+                    }
                     if (visited.Add(parent)) queue.Enqueue(parent);
                 }
             }
-            return null;
+            return ancestors.Count == 0 ? [] : new List<string>(ancestors);
         }
 
         public async Task InstallPackageAsync(string projectPath, string packageId, NuGetVersion version, CancellationToken cancellationToken)

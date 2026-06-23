@@ -45,6 +45,25 @@ namespace NuGetManagerSlim.Services
             NuGetVersion version,
             CancellationToken cancellationToken);
 
+        /// <summary>
+        /// Resolves the latest-version metadata and the installed version's
+        /// vulnerability advisories from a single registration fetch. Used by the
+        /// Installed/Browse background enrichment so each package costs one
+        /// registration round trip instead of two (a separate "latest" fetch plus
+        /// a separate installed-version fetch).
+        /// </summary>
+        /// <param name="needsDownloadCount">
+        /// When false, skips the nuget.org search fallback that resolves cumulative
+        /// download counts. The caller passes false when the row already carries a
+        /// download count (e.g. from a prior Browse search), eliminating a
+        /// redundant per-package search round trip.
+        /// </param>
+        Task<InstalledEnrichment?> GetInstalledEnrichmentAsync(
+            string packageId,
+            NuGetVersion? installedVersion,
+            bool needsDownloadCount,
+            CancellationToken cancellationToken);
+
         Task<IReadOnlyList<PackageVersionInfo>> GetVersionsAsync(
             string packageId,
             bool includePrerelease,

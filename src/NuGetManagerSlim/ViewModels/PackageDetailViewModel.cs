@@ -38,6 +38,7 @@ namespace NuGetManagerSlim.ViewModels
         [ObservableProperty] private bool _hasProjectUrl;
         [ObservableProperty] private bool _hasPublished;
         [ObservableProperty] private bool _hasVulnerabilities;
+        [ObservableProperty] private bool _hasRequiredByPackages;
         [ObservableProperty] private NuGetVersion? _selectedVersion;
         [ObservableProperty] private VersionListItem? _selectedVersionItem;
         [ObservableProperty] private bool _canInstall;
@@ -54,6 +55,11 @@ namespace NuGetManagerSlim.ViewModels
         private readonly BulkObservableCollection<DependencyGroupViewModel> _dependencyGroups = [];
         public ObservableCollection<PackageVulnerabilityInfo> Vulnerabilities => _vulnerabilities;
         private readonly BulkObservableCollection<PackageVulnerabilityInfo> _vulnerabilities = [];
+
+        // Direct packages that pull in this package when it is a transitive
+        // dependency, shown in a "Required by" section of the detail pane (issue #19).
+        public ObservableCollection<string> RequiredByPackages => _requiredByPackages;
+        private readonly BulkObservableCollection<string> _requiredByPackages = [];
 
         private CancellationTokenSource? _versionMetadataCts;
         private bool _suppressVersionReload;
@@ -83,6 +89,11 @@ namespace NuGetManagerSlim.ViewModels
             _vulnerabilities.ReplaceAll(System.Array.Empty<PackageVulnerabilityInfo>());
             HasVulnerabilities = false;
             ProjectMemberships.Clear();
+
+            // Surface which direct packages pull in this one when it's transitive.
+            var requiredBy = row.RequiredByPackageIds;
+            _requiredByPackages.ReplaceAll(requiredBy);
+            HasRequiredByPackages = row.IsTransitive && requiredBy.Count > 0;
 
             // Load versions
             var versions = await _feedService.GetVersionsAsync(row.PackageId, includePrerelease, cancellationToken);

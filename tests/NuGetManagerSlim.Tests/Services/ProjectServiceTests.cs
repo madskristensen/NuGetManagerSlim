@@ -270,5 +270,74 @@ namespace NuGetManagerSlim.Tests.Services
             // because 7.0.0 does not satisfy [1.0,2).
             Assert.Null(pkg.AllowedVersionRange);
         }
+
+        [Fact]
+        public void ParseTransitives_CollectsAllDirectAncestors()
+        {
+            // Issue #19: a transitive package pulled in by two different direct
+            // packages should list both as "required by".
+            using var doc = System.Text.Json.JsonDocument.Parse("""
+                {
+                  "project": {
+                    "frameworks": {
+                      "net48": {
+                        "dependencies": {
+                          "DirectA": { "target": "Package" },
+                          "DirectB": { "target": "Package" }
+                        }
+                      }
+                    }
+                  },
+                  "targets": {
+                    "net48": {
+                      "DirectA/1.0.0": { "type": "package", "dependencies": { "Shared": "1.0.0" } },
+                      "DirectB/1.0.0": { "type": "package", "dependencies": { "Shared": "1.0.0" } },
+                      "Shared/1.0.0": { "type": "package" }
+                    }
+                  }
+                }
+                """);
+
+            var transitives = ProjectService.ParseTransitivesFromAssets(doc.RootElement, "App", CancellationToken.None);
+
+            var shared = Assert.Single(transitives, p => p.PackageId == "Shared");
+            Assert.True(shared.IsTransitive);
+            Assert.Equal(new[] { "DirectA", "DirectB" }, shared.RequiredByPackageIds);
+            Assert.Equal("DirectA", shared.RequiredByPackageId);
+            // Direct packages are excluded from the transitive list.
+            Assert.DoesNotContain(transitives, p => p.PackageId == "DirectA" || p.PackageId == "DirectB");
+        }
+
+        [Fact]
+        public void ParseTransitives_DeepTransitive_ResolvesToDirectAncestor()
+        {
+            // A transitive reached only through another transitive should report
+            // the top-level direct package, not the intermediate one.
+            using var doc = System.Text.Json.JsonDocument.Parse("""
+                {
+                  "project": {
+                    "frameworks": {
+                      "net48": {
+                        "dependencies": { "Root": { "target": "Package" } }
+                      }
+                    }
+                  },
+                  "targets": {
+                    "net48": {
+                      "Root/1.0.0": { "type": "package", "dependencies": { "Mid": "1.0.0" } },
+                      "Mid/1.0.0": { "type": "package", "dependencies": { "Leaf": "1.0.0" } },
+                      "Leaf/1.0.0": { "type": "package" }
+                    }
+                  }
+                }
+                """);
+
+            var transitives = ProjectService.ParseTransitivesFromAssets(doc.RootElement, "Deep", CancellationToken.None);
+
+            var leaf = Assert.Single(transitives, p => p.PackageId == "Leaf");
+            Assert.Equal(new[] { "Root" }, leaf.RequiredByPackageIds);
+            var mid = Assert.Single(transitives, p => p.PackageId == "Mid");
+            Assert.Equal(new[] { "Root" }, mid.RequiredByPackageIds);
+        }
     }
 }

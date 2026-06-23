@@ -14,6 +14,7 @@ namespace NuGetManagerSlim.Tests.ViewModels
             string? latestPre = null,
             bool isTransitive = false,
             string? requiredBy = null,
+            string[]? requiredByIds = null,
             string? source = "nuget.org",
             bool includePrerelease = false)
         {
@@ -25,6 +26,7 @@ namespace NuGetManagerSlim.Tests.ViewModels
                 LatestPrereleaseVersion = latestPre != null ? NuGetVersion.Parse(latestPre) : null,
                 IsTransitive = isTransitive,
                 RequiredByPackageId = requiredBy,
+                RequiredByPackageIds = requiredByIds ?? (requiredBy != null ? new[] { requiredBy } : System.Array.Empty<string>()),
                 SourceName = source,
             })
             {
@@ -108,6 +110,21 @@ namespace NuGetManagerSlim.Tests.ViewModels
             var vm = MakeRow(isTransitive: true, requiredBy: "ParentPkg");
             Assert.True(vm.IsTransitive);
             Assert.Equal("required by: ParentPkg", vm.RequiredByDisplay);
+        }
+
+        [Fact]
+        public void RequiredByDisplay_WithMultipleAncestors_ListsAll()
+        {
+            var vm = MakeRow(isTransitive: true, requiredByIds: new[] { "PkgA", "PkgB" });
+            Assert.Equal("required by: PkgA, PkgB", vm.RequiredByDisplay);
+            Assert.Equal(new[] { "PkgA", "PkgB" }, vm.RequiredByPackageIds);
+        }
+
+        [Fact]
+        public void RequiredByDisplay_WhenNotTransitive_IsEmpty()
+        {
+            var vm = MakeRow(isTransitive: false, requiredByIds: new[] { "PkgA" });
+            Assert.Equal(string.Empty, vm.RequiredByDisplay);
         }
 
         [Fact]
