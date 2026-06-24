@@ -242,14 +242,20 @@ namespace NuGetManagerSlim.Tests.ViewModels
                 .ReturnsAsync(new List<PackageModel>());
 
             // The installed version carries an advisory, so the row survives the
-            // Vulnerable filter.
-            feedMock.Setup(f => f.GetPackageMetadataAsync("VulnerablePkg", It.IsAny<NuGetVersion>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new PackageModel
+            // Vulnerable filter. The Vulnerable view now resolves advisories from
+            // the bulk vulnerability index (one cacheable download matched
+            // locally) instead of a per-package metadata fetch.
+            feedMock.Setup(f => f.GetVulnerabilityIndexAsync(It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new Dictionary<string, IReadOnlyList<PackageVulnerabilityAdvisory>>(System.StringComparer.OrdinalIgnoreCase)
                 {
-                    PackageId = "VulnerablePkg",
-                    Vulnerabilities = new[]
+                    ["VulnerablePkg"] = new[]
                     {
-                        new PackageVulnerabilityInfo { Severity = 3, AdvisoryUrl = "https://example.com/a" },
+                        new PackageVulnerabilityAdvisory
+                        {
+                            Severity = 3,
+                            AdvisoryUrl = "https://example.com/a",
+                            AffectedVersions = VersionRange.Parse("[1.0.0, 2.0.0)"),
+                        },
                     },
                 });
 

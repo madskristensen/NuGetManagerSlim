@@ -967,29 +967,38 @@ namespace NuGetManagerSlim.ViewModels
         // Resolves each installed package's vulnerability advisories for its
         // installed version. Used by the Vulnerable view, which must know the
         // advisory state of the *installed* version (not the latest) before it
-        // can decide whether to keep the row.
+        // can decide whether to keep the row. Backed by the feed's bulk
+        // vulnerability index: one cacheable download matched locally, instead of
+        // a registration round trip per package (which made this view slow).
         private async Task EnrichVulnerabilitiesAsync(IReadOnlyList<PackageRowViewModel> rows, CancellationToken ct)
         {
             if (rows == null || rows.Count == 0) return;
-            await TaskScheduler.Default;
-            var tasks = rows.Select(async row =>
+
+            IReadOnlyDictionary<string, IReadOnlyList<PackageVulnerabilityAdvisory>> index;
+            try
+            {
+                index = await _feedService.GetVulnerabilityIndexAsync(ct).ConfigureAwait(true);
+            }
+            catch (OperationCanceledException) { return; }
+            catch (Exception ex) { await ex.LogAsync(); return; }
+
+            if (index == null || index.Count == 0) return;
+
+            foreach (var row in rows)
             {
                 if (ct.IsCancellationRequested) return;
                 var version = row.InstalledVersion;
-                if (version == null) return;
-                await s_enrichmentThrottle.WaitAsync(ct).ConfigureAwait(false);
-                try
-                {
-                    var meta = await _feedService.GetPackageMetadataAsync(row.PackageId, version, ct).ConfigureAwait(false);
-                    if (meta == null || ct.IsCancellationRequested) return;
-                    row.ApplyVulnerabilities(meta.Vulnerabilities);
-                }
-                catch (OperationCanceledException) { }
-                catch (Exception ex) { await ex.LogAsync(); }
-                finally { s_enrichmentThrottle.Release(); }
-            });
-            try { await Task.WhenAll(tasks).ConfigureAwait(false); }
-            catch (OperationCanceledException) { }
+                if (version == null) continue;
+                if (!index.TryGetValue(row.PackageId, out var advisories) || advisories == null) continue;
+
+                var matched = advisories
+                    .Where(a => a.Affects(version))
+                    .Select(a => a.ToInfo())
+                    .ToList();
+
+                if (matched.Count > 0)
+                    row.ApplyVulnerabilities(matched);
+            }
         }
 
         // Resolves each installed package's deprecation status for its installed

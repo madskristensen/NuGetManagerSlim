@@ -202,6 +202,7 @@ namespace NuGetManagerSlim.Services
             _searchResourceCache.Clear();
             _metadataResourceCache.Clear();
             _searchDiskCache.Clear();
+            lock (_vulnIndexLock) { _vulnIndexCache = null; }
             System.Threading.Interlocked.Exchange(ref _bypassNextNetworkFetch, 1);
             DiagnosticsLogger.Info("Caches cleared by user-initiated refresh.");
         }
@@ -214,6 +215,15 @@ namespace NuGetManagerSlim.Services
         private readonly ConcurrentDictionary<string, SourceRepository> _repositoryCache = new(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentDictionary<string, Task<PackageSearchResource>> _searchResourceCache = new(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentDictionary<string, Task<PackageMetadataResource>> _metadataResourceCache = new(StringComparer.OrdinalIgnoreCase);
+
+        // Memory cache for the merged bulk vulnerability index. The underlying
+        // advisory files are also cached on disk by NuGet's HTTP layer (shared
+        // with the built-in client), but merging the per-source dictionaries on
+        // every Vulnerable-view visit is wasteful, so keep the merged result for
+        // the session with the same TTL as the per-package metadata cache.
+        private Dictionary<string, IReadOnlyList<PackageVulnerabilityAdvisory>>? _vulnIndexCache;
+        private DateTime _vulnIndexExpiresUtc;
+        private readonly object _vulnIndexLock = new();
 
         // Disk-backed second tier for the search-result cache. Lets the first
         // search of a fresh VS session be served from disk when the same query
@@ -1340,6 +1350,88 @@ namespace NuGetManagerSlim.Services
             // README fetching from nuget.org requires the flat container API
             // Return null for now; detailed implementation would use HttpClient + nuget.org flat container
             return Task.FromResult<string?>(null);
+        }
+
+        // Downloads and merges the bulk vulnerability index across all enabled
+        // sources. Each source exposes the data through IVulnerabilityInfoResource
+        // (a couple of static JSON files), so this is one cacheable fetch per
+        // source instead of a registration round trip per package. Sources that
+        // don't expose the resource (most private feeds) are skipped.
+        public async Task<IReadOnlyDictionary<string, IReadOnlyList<PackageVulnerabilityAdvisory>>> GetVulnerabilityIndexAsync(
+            CancellationToken cancellationToken)
+        {
+            lock (_vulnIndexLock)
+            {
+                if (_vulnIndexCache != null && DateTime.UtcNow < _vulnIndexExpiresUtc)
+                    return _vulnIndexCache;
+            }
+
+            using var _ = DiagnosticsLogger.Time("GetVulnerabilityIndexAsync");
+            var merged = new Dictionary<string, List<PackageVulnerabilityAdvisory>>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var source in GetEnabledSources())
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                try
+                {
+                    var resource = await GetRepository(source)
+                        .GetResourceAsync<IVulnerabilityInfoResource>(cancellationToken)
+                        .ConfigureAwait(false);
+                    if (resource == null) continue;
+
+                    var result = await resource
+                        .GetVulnerabilityInfoAsync(_cacheContext, _logger, cancellationToken)
+                        .ConfigureAwait(false);
+                    if (result == null) continue;
+
+                    if (result.Exceptions != null)
+                        DiagnosticsLogger.Warn($"Vulnerability index for '{source.Name}' reported errors: {result.Exceptions.Message}");
+
+                    if (result.KnownVulnerabilities == null) continue;
+
+                    foreach (var file in result.KnownVulnerabilities)
+                    {
+                        if (file == null) continue;
+                        foreach (var entry in file)
+                        {
+                            if (string.IsNullOrEmpty(entry.Key) || entry.Value == null) continue;
+                            if (!merged.TryGetValue(entry.Key, out var list))
+                            {
+                                list = new List<PackageVulnerabilityAdvisory>();
+                                merged[entry.Key] = list;
+                            }
+                            foreach (var v in entry.Value)
+                            {
+                                if (v == null) continue;
+                                list.Add(new PackageVulnerabilityAdvisory
+                                {
+                                    Severity = (int)v.Severity,
+                                    AdvisoryUrl = v.Url?.ToString(),
+                                    AffectedVersions = v.Versions,
+                                });
+                            }
+                        }
+                    }
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex)
+                {
+                    DiagnosticsLogger.Warn($"Vulnerability index fetch failed for '{source.Name}': {ex.Message}");
+                }
+            }
+
+            var final = merged.ToDictionary(
+                kvp => kvp.Key,
+                kvp => (IReadOnlyList<PackageVulnerabilityAdvisory>)kvp.Value,
+                StringComparer.OrdinalIgnoreCase);
+
+            lock (_vulnIndexLock)
+            {
+                _vulnIndexCache = final;
+                _vulnIndexExpiresUtc = DateTime.UtcNow.Add(MetadataCacheTtl);
+            }
+
+            return final;
         }
 
         private static IReadOnlyList<PackageSourceModel> GetEnabledSources()

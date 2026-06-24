@@ -146,6 +146,29 @@ namespace NuGetManagerSlim.Models
             : $"{SeverityText} severity - {AdvisoryUrl}";
     }
 
+    // A single advisory from the feed's bulk vulnerability index. Unlike
+    // <see cref="PackageVulnerabilityInfo"/> (which describes an advisory already
+    // matched to a specific installed version), this carries the affected
+    // <see cref="VersionRange"/> so the Vulnerable view can match every installed
+    // and transitive package locally against the once-downloaded index.
+    public class PackageVulnerabilityAdvisory
+    {
+        // Severity ordinal as reported by the feed: 0 = Low, 1 = Moderate,
+        // 2 = High, 3 = Critical.
+        public int Severity { get; init; }
+        public string? AdvisoryUrl { get; init; }
+        public VersionRange? AffectedVersions { get; init; }
+
+        // True when the supplied installed version falls in this advisory's
+        // affected range. A null range is treated as "applies to all versions"
+        // so a malformed feed entry never silently hides a real advisory.
+        public bool Affects(NuGetVersion version)
+            => AffectedVersions == null || AffectedVersions.Satisfies(version);
+
+        public PackageVulnerabilityInfo ToInfo()
+            => new() { Severity = Severity, AdvisoryUrl = AdvisoryUrl };
+    }
+
     public class PackageDependencyInfo
     {
         public string PackageId { get; init; } = string.Empty;

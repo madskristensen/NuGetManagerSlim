@@ -69,6 +69,16 @@ namespace NuGetManagerSlim.Services
             bool includePrerelease,
             CancellationToken cancellationToken);
 
+        /// <summary>
+        /// Downloads the feed's bulk vulnerability index once (a couple of static,
+        /// cacheable files shared with the built-in NuGet client's on-disk HTTP
+        /// cache) and returns every known advisory keyed by package id. Lets the
+        /// Vulnerable view match all installed and transitive packages locally
+        /// instead of issuing one registration round trip per package.
+        /// </summary>
+        Task<IReadOnlyDictionary<string, IReadOnlyList<PackageVulnerabilityAdvisory>>> GetVulnerabilityIndexAsync(
+            CancellationToken cancellationToken);
+
         Task<IReadOnlyList<PackageSourceModel>> GetSourcesAsync(
             CancellationToken cancellationToken);
 
