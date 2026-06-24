@@ -128,6 +128,27 @@ namespace NuGetManagerSlim.Tests.ViewModels
         }
 
         [Fact]
+        public void HasRequiredBy_WithAncestors_IsTrue()
+        {
+            var vm = MakeRow(isTransitive: true, requiredBy: "ParentPkg");
+            Assert.True(vm.HasRequiredBy);
+        }
+
+        [Fact]
+        public void HasRequiredBy_TransitiveWithoutAncestors_IsFalse()
+        {
+            var vm = MakeRow(isTransitive: true, requiredByIds: System.Array.Empty<string>());
+            Assert.False(vm.HasRequiredBy);
+        }
+
+        [Fact]
+        public void HasRequiredBy_WhenNotTransitive_IsFalse()
+        {
+            var vm = MakeRow(isTransitive: false, requiredByIds: new[] { "PkgA" });
+            Assert.False(vm.HasRequiredBy);
+        }
+
+        [Fact]
         public void GroupKey_DirectPackage_IsPackages()
         {
             var vm = MakeRow(isTransitive: false);

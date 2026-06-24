@@ -202,6 +202,11 @@ namespace NuGetManagerSlim.ViewModels
                 ? $"required by: {_model.RequiredByPackageId}"
                 : string.Empty);
 
+        // True when this transitive package knows which direct packages pull it
+        // in. Drives the required-by tooltip affordance, which is hidden when
+        // there's nothing to show (issue #24).
+        public bool HasRequiredBy => RequiredByDisplay.Length > 0;
+
         // Vulnerability metadata is fetched lazily for the installed version, so
         // it may arrive after the row is created. ApplyVulnerabilities overrides
         // whatever the model carried.

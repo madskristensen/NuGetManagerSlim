@@ -437,15 +437,20 @@
                                  use this row for popularity context instead. -->
                             <StackPanel Grid.Column="1" Grid.Row="1" Orientation="Horizontal" Margin="8,1,0,0">
                                 <TextBlock Text="{Binding DownloadCountDisplay}"
+                                           VerticalAlignment="Center"
                                            Style="{StaticResource MutedTextStyle}" />
                                 <TextBlock Text="{Binding AuthorDisplay}"
-                                           Style="{StaticResource MutedTextStyle}" Margin="6,0,0,0" />
-                                <TextBlock Text="{Binding RequiredByDisplay}"
-                                           Style="{StaticResource MutedTextStyle}" Margin="6,0,0,0"
                                            VerticalAlignment="Center"
-                                           TextTrimming="CharacterEllipsis"
-                                           ToolTip="{Binding RequiredByDisplay}"
-                                           Visibility="{Binding IsTransitive, Converter={StaticResource BoolToVis}}" />
+                                           Style="{StaticResource MutedTextStyle}" Margin="6,0,0,0" />
+                                <!-- Transitive packages list the direct packages that pull them
+                                     in. The list can be long and pushed the row off-screen when
+                                     rendered inline, so it's shown as an icon-only affordance with
+                                     the detail surfaced in a tooltip instead (issue #24). -->
+                                <imaging:CrispImage Width="12" Height="12" Margin="6,0,0,0"
+                                                    VerticalAlignment="Center"
+                                                    Moniker="{x:Static catalog:KnownMonikers.Reference}"
+                                                    ToolTip="{Binding RequiredByDisplay}"
+                                                    Visibility="{Binding HasRequiredBy, Converter={StaticResource BoolToVis}}" />
                             </StackPanel>
 
                             <!-- Quick action area. The update button is always visible when an
