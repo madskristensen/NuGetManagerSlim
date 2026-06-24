@@ -429,6 +429,15 @@
                                                     Moniker="{x:Static catalog:KnownMonikers.StatusSecurityWarning}"
                                                     ToolTip="{Binding VulnerabilityTooltip}"
                                                     Visibility="{Binding HasVulnerabilities, Converter={StaticResource BoolToVis}}" />
+                                <!-- Deprecation flag shown next to the title (issue #25). Like the
+                                     vulnerability flag, it's icon-only with the reason surfaced as a
+                                     tooltip, so deprecated packages are visible in every list view
+                                     rather than only via the version dropdown strikethrough. -->
+                                <imaging:CrispImage Width="14" Height="14" Margin="6,0,0,0"
+                                                    VerticalAlignment="Center"
+                                                    Moniker="{x:Static catalog:KnownMonikers.StatusNoNoColor}"
+                                                    ToolTip="{Binding DeprecationTooltip}"
+                                                    Visibility="{Binding IsDeprecated, Converter={StaticResource BoolToVis}}" />
                             </StackPanel>
 
                             <!-- Downloads + author. The update arrow icon in the action area
@@ -448,7 +457,7 @@
                                      the detail surfaced in a tooltip instead (issue #24). -->
                                 <imaging:CrispImage Width="12" Height="12" Margin="6,0,0,0"
                                                     VerticalAlignment="Center"
-                                                    Moniker="{x:Static catalog:KnownMonikers.Reference}"
+                                                    Moniker="{x:Static catalog:KnownMonikers.PackageReference}"
                                                     ToolTip="{Binding RequiredByDisplay}"
                                                     Visibility="{Binding HasRequiredBy, Converter={StaticResource BoolToVis}}" />
                             </StackPanel>
@@ -816,7 +825,32 @@
                             </StackPanel>
                         </Border>
 
-                        <!-- Metadata row -->
+                        <!-- Deprecation notice for the selected version (issue #25). Styled
+                             with a less alarming amber palette than the red vulnerabilities box
+                             and placed below it, since deprecation is informational rather than
+                             an active security risk. -->
+                        <Border Margin="0,0,0,10" Padding="8,6"
+                                CornerRadius="3"
+                                Background="#1FCA8A00"
+                                BorderBrush="#CA8A00" BorderThickness="1"
+                                Visibility="{Binding Detail.IsDeprecated, Converter={StaticResource BoolToVis}}">
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                    <imaging:CrispImage Width="14" Height="14"
+                                                        Moniker="{x:Static catalog:KnownMonikers.StatusNoNoColor}"
+                                                        VerticalAlignment="Center" />
+                                    <TextBlock Text="Package deprecated"
+                                               FontWeight="Bold" FontSize="11"
+                                               Margin="6,0,0,0" VerticalAlignment="Center"
+                                               Foreground="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowTextKey}}" />
+                                </StackPanel>
+                                <TextBlock Text="{Binding Detail.DeprecationReason}"
+                                           FontSize="11" TextWrapping="Wrap"
+                                           Foreground="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowTextKey}}"
+                                           Visibility="{Binding Detail.HasDeprecationReason, Converter={StaticResource BoolToVis}}" />
+                            </StackPanel>
+                        </Border>
+
                         <WrapPanel Margin="0,0,0,6">
                             <TextBlock Style="{StaticResource MutedTextStyle}" Margin="0,0,12,0">
                             <Run Text="License: " />

@@ -108,6 +108,53 @@ namespace NuGetManagerSlim.Tests.ViewModels
         }
 
         [Fact]
+        public async Task LoadAsync_SurfacesDeprecationCalloutForSelectedVersion()
+        {
+            var feedMock = new Mock<INuGetFeedService>();
+            var projMock = new Mock<IProjectService>();
+            feedMock.Setup(f => f.GetVersionsAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<PackageVersionInfo>
+                {
+                    new(NuGetVersion.Parse("1.0.0")),
+                });
+            feedMock.Setup(f => f.GetPackageMetadataAsync(It.IsAny<string>(), It.IsAny<NuGetVersion>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new PackageModel
+                {
+                    PackageId = "TestPkg",
+                    IsDeprecated = true,
+                    DeprecationReason = "Use NewPkg instead",
+                });
+            var vm = new PackageDetailViewModel(feedMock.Object, projMock.Object, _ => { });
+
+            await vm.LoadAsync(MakeRow(installed: null), new ProjectScopeModel { DisplayName = "MyApp", ProjectFullPath = @"C:\x\x.csproj" }, false, CancellationToken.None);
+
+            Assert.True(vm.IsDeprecated);
+            Assert.True(vm.HasDeprecationReason);
+            Assert.Equal("Use NewPkg instead", vm.DeprecationReason);
+        }
+
+        [Fact]
+        public async Task LoadAsync_NonDeprecatedVersion_HasNoDeprecationCallout()
+        {
+            var feedMock = new Mock<INuGetFeedService>();
+            var projMock = new Mock<IProjectService>();
+            feedMock.Setup(f => f.GetVersionsAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<PackageVersionInfo>
+                {
+                    new(NuGetVersion.Parse("1.0.0")),
+                });
+            feedMock.Setup(f => f.GetPackageMetadataAsync(It.IsAny<string>(), It.IsAny<NuGetVersion>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new PackageModel { PackageId = "TestPkg" });
+            var vm = new PackageDetailViewModel(feedMock.Object, projMock.Object, _ => { });
+
+            await vm.LoadAsync(MakeRow(installed: null), new ProjectScopeModel { DisplayName = "MyApp", ProjectFullPath = @"C:\x\x.csproj" }, false, CancellationToken.None);
+
+            Assert.False(vm.IsDeprecated);
+            Assert.False(vm.HasDeprecationReason);
+            Assert.Equal(string.Empty, vm.DeprecationReason);
+        }
+
+        [Fact]
         public async Task LoadAsync_SetsDescription()
         {
             var (vm, _, _, _) = CreateViewModel();

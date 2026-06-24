@@ -38,6 +38,9 @@ namespace NuGetManagerSlim.ViewModels
         [ObservableProperty] private bool _hasProjectUrl;
         [ObservableProperty] private bool _hasPublished;
         [ObservableProperty] private bool _hasVulnerabilities;
+        [ObservableProperty] private bool _isDeprecated;
+        [ObservableProperty] private string _deprecationReason = string.Empty;
+        [ObservableProperty] private bool _hasDeprecationReason;
         [ObservableProperty] private bool _hasRequiredByPackages;
         [ObservableProperty] private NuGetVersion? _selectedVersion;
         [ObservableProperty] private VersionListItem? _selectedVersionItem;
@@ -88,6 +91,9 @@ namespace NuGetManagerSlim.ViewModels
             _dependencyGroups.ReplaceAll(System.Array.Empty<DependencyGroupViewModel>());
             _vulnerabilities.ReplaceAll(System.Array.Empty<PackageVulnerabilityInfo>());
             HasVulnerabilities = false;
+            IsDeprecated = false;
+            DeprecationReason = string.Empty;
+            HasDeprecationReason = false;
             ProjectMemberships.Clear();
 
             // Surface which direct packages pull in this one when it's transitive.
@@ -197,6 +203,10 @@ namespace NuGetManagerSlim.ViewModels
 
                 _vulnerabilities.ReplaceAll(metadata.Vulnerabilities);
                 HasVulnerabilities = metadata.Vulnerabilities.Count > 0;
+
+                IsDeprecated = metadata.IsDeprecated;
+                DeprecationReason = metadata.DeprecationReason ?? string.Empty;
+                HasDeprecationReason = !string.IsNullOrEmpty(metadata.DeprecationReason);
             }
             catch (OperationCanceledException) { }
             catch (Exception ex)
