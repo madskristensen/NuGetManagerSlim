@@ -29,6 +29,7 @@ namespace NuGetManagerSlim.ViewModels
         private readonly INuGetFeedService _feedService;
         private readonly IRestoreMonitorService _restoreMonitor;
         private readonly IMruPackageService? _mruService;
+        private readonly IViewModePreferenceService? _viewModePreferences;
 
         // Shared across all enrichment fan-outs to avoid the previous pattern of
         // allocating a fresh SemaphoreSlim per call (which let rapid filter
@@ -121,21 +122,38 @@ namespace NuGetManagerSlim.ViewModels
                 // otherwise loop with the anchor-sync handler.
                 if (value == ViewMode) return;
 
-                _suppressFilterReload = true;
-                try
-                {
-                    FilterVulnerable = value == PackageViewMode.Vulnerable;
-                    FilterUpdates = value == PackageViewMode.Updates;
-                    FilterInstalled = value == PackageViewMode.Installed
-                        || value == PackageViewMode.Updates
-                        || value == PackageViewMode.Vulnerable;
-                }
-                finally
-                {
-                    _suppressFilterReload = false;
-                }
+                SetViewModeFlags(value);
                 OnPropertyChanged();
+
+                // Persist the user's choice so the next session starts under the
+                // same mode. Visual Studio independently remembers the menu
+                // controller's anchor icon across restarts; restoring the mode
+                // keeps the icon, the dropdown check mark, and the list in sync
+                // (issue #23).
+                _ = _viewModePreferences?.SaveAsync(value, CancellationToken.None);
+
                 _ = ReloadPackagesAsync();
+            }
+        }
+
+        // Sets the backing filter flags so ViewMode resolves to the requested
+        // mode. _suppressFilterReload keeps the per-flag change handlers from
+        // each kicking off their own reload, leaving the caller to issue a
+        // single one afterwards.
+        private void SetViewModeFlags(PackageViewMode value)
+        {
+            _suppressFilterReload = true;
+            try
+            {
+                FilterVulnerable = value == PackageViewMode.Vulnerable;
+                FilterUpdates = value == PackageViewMode.Updates;
+                FilterInstalled = value == PackageViewMode.Installed
+                    || value == PackageViewMode.Updates
+                    || value == PackageViewMode.Vulnerable;
+            }
+            finally
+            {
+                _suppressFilterReload = false;
             }
         }
 
@@ -151,12 +169,14 @@ namespace NuGetManagerSlim.ViewModels
             IProjectService projectService,
             INuGetFeedService feedService,
             IRestoreMonitorService restoreMonitor,
-            IMruPackageService? mruService)
+            IMruPackageService? mruService,
+            IViewModePreferenceService? viewModePreferences = null)
         {
             _projectService = projectService;
             _feedService = feedService;
             _restoreMonitor = restoreMonitor;
             _mruService = mruService;
+            _viewModePreferences = viewModePreferences;
 
             _debounceTimer = new System.Timers.Timer(300) { AutoReset = false };
             _debounceTimer.Elapsed += OnDebounceElapsed;
@@ -244,6 +264,22 @@ namespace NuGetManagerSlim.ViewModels
             IsLoading = true;
             try
             {
+                // Restore the last selected view mode before any packages load so
+                // the toolbar icon (which Visual Studio persists separately), the
+                // dropdown check mark, and the package list all agree on startup
+                // (issue #23). Done silently here because the project scope isn't
+                // set yet - the first ReloadPackagesAsync runs once a scope is
+                // selected and honors the restored mode.
+                if (_viewModePreferences != null)
+                {
+                    var saved = await _viewModePreferences.GetAsync(cancellationToken);
+                    if (saved.HasValue && saved.Value != ViewMode)
+                    {
+                        SetViewModeFlags(saved.Value);
+                        OnPropertyChanged(nameof(ViewMode));
+                    }
+                }
+
                 var sources = await _feedService.GetSourcesAsync(cancellationToken);
                 PackageSources.Clear();
                 foreach (var s in sources)
