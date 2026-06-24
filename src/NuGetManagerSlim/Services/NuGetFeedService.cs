@@ -878,11 +878,19 @@ namespace NuGetManagerSlim.Services
 
                 // Installed-version advisories come from the full (listed +
                 // unlisted) set so they mirror the dedicated versioned lookup.
+                // When the exact installed version isn't on this source (unlisted,
+                // removed, or only available on another feed) fall back to the
+                // latest available metadata's advisories - exactly what the
+                // versioned GetPackageMetadataAsync path does - so the vulnerability
+                // badge stays consistent between the Installed and Vulnerable views
+                // (issue #26). Without the fallback a package flagged in the
+                // Vulnerable view showed no badge in the plain Installed list.
                 IReadOnlyList<PackageVulnerabilityInfo> installedVulnerabilities = [];
                 if (installedVersion != null)
                 {
                     var installedMeta = allMetadata.FirstOrDefault(
-                        m => m?.Identity?.Version != null && m.Identity.Version.Equals(installedVersion));
+                        m => m?.Identity?.Version != null && m.Identity.Version.Equals(installedVersion))
+                        ?? allMetadata.OrderByDescending(m => m.Identity.Version).FirstOrDefault();
                     if (installedMeta != null)
                         installedVulnerabilities = MapVulnerabilities(installedMeta);
                 }
