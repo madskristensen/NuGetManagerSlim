@@ -628,6 +628,33 @@ namespace NuGetManagerSlim.Services
             return (stable, prerelease);
         }
 
+        // Builds the per-major "highest version" maps used by the target-framework
+        // update cap (issue #27). MaxStable tracks the highest stable version for
+        // each major; MaxPrerelease tracks the highest version overall (stable or
+        // prerelease) for each major, mirroring how UpdateCandidateVersion treats
+        // the include-prerelease toggle.
+        public static (IReadOnlyDictionary<int, NuGetVersion> Stable, IReadOnlyDictionary<int, NuGetVersion> Prerelease) BuildMaxByMajor(
+            IEnumerable<NuGetVersion> versions)
+        {
+            var stable = new Dictionary<int, NuGetVersion>();
+            var prerelease = new Dictionary<int, NuGetVersion>();
+            if (versions == null) return (stable, prerelease);
+
+            foreach (var v in versions)
+            {
+                if (v == null) continue;
+                var major = v.Major;
+
+                if (!prerelease.TryGetValue(major, out var curPre) || v > curPre)
+                    prerelease[major] = v;
+
+                if (!v.IsPrerelease && (!stable.TryGetValue(major, out var curStable) || v > curStable))
+                    stable[major] = v;
+            }
+
+            return (stable, prerelease);
+        }
+
         private enum SourceMetadataStatus { Found, NotFound, Faulted }
 
         private readonly struct SourceMetadataOutcome
@@ -714,6 +741,8 @@ namespace NuGetManagerSlim.Services
                 var latest = allMetadata.OrderByDescending(m => m.Identity.Version).First();
                 var (latestStable, latestPrerelease) = SelectLatestVersions(
                     allMetadata.Select(m => m.Identity.Version));
+                var (maxStableByMajor, maxPrereleaseByMajor) = BuildMaxByMajor(
+                    allMetadata.Select(m => m.Identity.Version));
 
                 var deps = latest.DependencySets
                     .SelectMany(ds => ds.Packages.Select(p => new PackageDependencyInfo
@@ -756,6 +785,8 @@ namespace NuGetManagerSlim.Services
                     PackageId = latest.Identity.Id,
                     LatestStableVersion = latestStable,
                     LatestPrereleaseVersion = latestPrerelease,
+                    MaxStableByMajor = maxStableByMajor,
+                    MaxPrereleaseByMajor = maxPrereleaseByMajor,
                     Description = latest.Description,
                     Authors = latest.Authors,
                     LicenseExpression = latest.LicenseMetadata?.License,
@@ -909,6 +940,8 @@ namespace NuGetManagerSlim.Services
                 var latest = listed.OrderByDescending(m => m.Identity.Version).First();
                 var (latestStable, latestPrerelease) = SelectLatestVersions(
                     listed.Select(m => m.Identity.Version));
+                var (maxStableByMajor, maxPrereleaseByMajor) = BuildMaxByMajor(
+                    listed.Select(m => m.Identity.Version));
 
                 var deps = latest.DependencySets
                     .SelectMany(ds => ds.Packages.Select(p => new PackageDependencyInfo
@@ -949,6 +982,8 @@ namespace NuGetManagerSlim.Services
                     PackageId = latest.Identity.Id,
                     LatestStableVersion = latestStable,
                     LatestPrereleaseVersion = latestPrerelease,
+                    MaxStableByMajor = maxStableByMajor,
+                    MaxPrereleaseByMajor = maxPrereleaseByMajor,
                     Description = latest.Description,
                     Authors = latest.Authors,
                     LicenseExpression = latest.LicenseMetadata?.License,
@@ -1117,6 +1152,8 @@ namespace NuGetManagerSlim.Services
                 // one - so they stay consistent with the latest-metadata path.
                 var (latestStable, latestPrerelease) = SelectLatestVersions(
                     allMetadata.Select(m => m.Identity.Version));
+                var (maxStableByMajor, maxPrereleaseByMajor) = BuildMaxByMajor(
+                    allMetadata.Select(m => m.Identity.Version));
 
                 var deps = meta.DependencySets
                     .SelectMany(ds => ds.Packages.Select(p => new PackageDependencyInfo
@@ -1156,6 +1193,8 @@ namespace NuGetManagerSlim.Services
                     PackageId = meta.Identity.Id,
                     LatestStableVersion = latestStable,
                     LatestPrereleaseVersion = latestPrerelease,
+                    MaxStableByMajor = maxStableByMajor,
+                    MaxPrereleaseByMajor = maxPrereleaseByMajor,
                     Description = meta.Description,
                     Authors = meta.Authors,
                     LicenseExpression = meta.LicenseMetadata?.License,

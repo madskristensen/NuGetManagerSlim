@@ -1,3 +1,4 @@
+using System.Linq;
 using NuGet.Versioning;
 using NuGetManagerSlim.Models;
 using NuGetManagerSlim.ViewModels;
@@ -320,6 +321,186 @@ namespace NuGetManagerSlim.Tests.ViewModels
             Assert.Contains(nameof(vm.HasUpdate), changed);
             Assert.Contains(nameof(vm.UpdateCandidateVersion), changed);
             Assert.Contains(nameof(vm.UpdateBadge), changed);
+        }
+
+        private static PackageRowViewModel MakeCappedRow(
+            string id,
+            string installed,
+            string[] versions,
+            int? cap,
+            bool includePrerelease = false)
+        {
+            var parsed = versions.Select(NuGetVersion.Parse).ToList();
+            var (maxStable, maxPre) = NuGetManagerSlim.Services.NuGetFeedService.BuildMaxByMajor(parsed);
+            var (latestStable, latestPre) = NuGetManagerSlim.Services.NuGetFeedService.SelectLatestVersions(parsed);
+            return new PackageRowViewModel(new PackageModel
+            {
+                PackageId = id,
+                InstalledVersion = NuGetVersion.Parse(installed),
+                LatestStableVersion = latestStable,
+                LatestPrereleaseVersion = latestPre,
+                MaxStableByMajor = maxStable,
+                MaxPrereleaseByMajor = maxPre,
+            })
+            {
+                IncludePrerelease = includePrerelease,
+                TargetFrameworkMajorCap = cap,
+            };
+        }
+
+        [Fact]
+        public void UpdateCandidate_CappedFamilyWithinTfm_StopsAtTfmMajor()
+        {
+            var vm = MakeCappedRow(
+                "System.Text.Json",
+                installed: "8.0.3",
+                versions: new[] { "8.0.3", "8.0.4", "9.0.0" },
+                cap: 8);
+
+            Assert.Equal(NuGetVersion.Parse("8.0.4"), vm.UpdateCandidateVersion);
+            Assert.True(vm.HasUpdate);
+            Assert.Equal("→ 8.0.4", vm.UpdateBadge);
+        }
+
+        [Fact]
+        public void UpdateCandidate_NonCappedFamily_IgnoresCap()
+        {
+            var vm = MakeCappedRow(
+                "Newtonsoft.Json",
+                installed: "8.0.3",
+                versions: new[] { "8.0.3", "8.0.4", "9.0.0" },
+                cap: 8);
+
+            Assert.Equal(NuGetVersion.Parse("9.0.0"), vm.UpdateCandidateVersion);
+        }
+
+        [Fact]
+        public void UpdateCandidate_NoCap_OffersLatest()
+        {
+            var vm = MakeCappedRow(
+                "System.Text.Json",
+                installed: "8.0.3",
+                versions: new[] { "8.0.3", "8.0.4", "9.0.0" },
+                cap: null);
+
+            Assert.Equal(NuGetVersion.Parse("9.0.0"), vm.UpdateCandidateVersion);
+        }
+
+        [Fact]
+        public void UpdateCandidate_CapAtOrAboveLatest_OffersLatest()
+        {
+            var vm = MakeCappedRow(
+                "System.Text.Json",
+                installed: "8.0.3",
+                versions: new[] { "8.0.3", "8.0.4", "9.0.0" },
+                cap: 9);
+
+            Assert.Equal(NuGetVersion.Parse("9.0.0"), vm.UpdateCandidateVersion);
+        }
+
+        [Fact]
+        public void UpdateCandidate_CappedFamily_PrereleaseModeRespectsCap()
+        {
+            var vm = MakeCappedRow(
+                "System.Text.Json",
+                installed: "8.0.3",
+                versions: new[] { "8.0.3", "8.0.4", "8.1.0-beta", "9.0.0" },
+                cap: 8,
+                includePrerelease: true);
+
+            Assert.Equal(NuGetVersion.Parse("8.1.0-beta"), vm.UpdateCandidateVersion);
+        }
+
+        [Fact]
+        public void UpdateCandidate_CappedFamily_NoPerMajorData_FallsBackOnlyWithinCap()
+        {
+            // No per-major maps (un-enriched row): an above-cap latest must not be
+            // suggested, so the candidate is null rather than the 9.0.0 latest.
+            var vm = new PackageRowViewModel(new PackageModel
+            {
+                PackageId = "System.Text.Json",
+                InstalledVersion = NuGetVersion.Parse("8.0.3"),
+                LatestStableVersion = NuGetVersion.Parse("9.0.0"),
+            })
+            {
+                TargetFrameworkMajorCap = 8,
+            };
+
+            Assert.Null(vm.UpdateCandidateVersion);
+            Assert.False(vm.HasUpdate);
+        }
+
+        [Fact]
+        public void TargetFrameworkMajorCap_Toggle_RaisesUpdateNotifications()
+        {
+            var vm = MakeCappedRow(
+                "System.Text.Json",
+                installed: "8.0.3",
+                versions: new[] { "8.0.3", "8.0.4", "9.0.0" },
+                cap: null);
+            Assert.Equal(NuGetVersion.Parse("9.0.0"), vm.UpdateCandidateVersion);
+
+            var changed = new System.Collections.Generic.List<string>();
+            vm.PropertyChanged += (_, e) => changed.Add(e.PropertyName!);
+
+            vm.TargetFrameworkMajorCap = 8;
+
+            Assert.Equal(NuGetVersion.Parse("8.0.4"), vm.UpdateCandidateVersion);
+            Assert.Contains(nameof(vm.UpdateCandidateVersion), changed);
+            Assert.Contains(nameof(vm.HasUpdate), changed);
+            Assert.Contains(nameof(vm.UpdateBadge), changed);
+        }
+
+        [Fact]
+        public void IsUpdateCapped_WhenNewerMajorHeldBack_IsTrueWithTooltip()
+        {
+            var vm = MakeCappedRow(
+                "System.Text.Json",
+                installed: "8.0.3",
+                versions: new[] { "8.0.3", "8.0.4", "9.0.0" },
+                cap: 8);
+
+            Assert.True(vm.IsUpdateCappedByTargetFramework);
+            Assert.Contains("8.x", vm.UpdateCapTooltip);
+            Assert.Contains("9.0.0", vm.UpdateCapTooltip);
+        }
+
+        [Fact]
+        public void IsUpdateCapped_WhenCappedFamilyButNoNewerMajor_IsFalse()
+        {
+            var vm = MakeCappedRow(
+                "System.Text.Json",
+                installed: "8.0.3",
+                versions: new[] { "8.0.3", "8.0.4" },
+                cap: 8);
+
+            Assert.False(vm.IsUpdateCappedByTargetFramework);
+            Assert.Equal(string.Empty, vm.UpdateCapTooltip);
+        }
+
+        [Fact]
+        public void IsUpdateCapped_WhenNonCappedFamily_IsFalse()
+        {
+            var vm = MakeCappedRow(
+                "Newtonsoft.Json",
+                installed: "8.0.3",
+                versions: new[] { "8.0.3", "9.0.0" },
+                cap: 8);
+
+            Assert.False(vm.IsUpdateCappedByTargetFramework);
+            Assert.Equal(string.Empty, vm.UpdateCapTooltip);
+        }
+
+        [Fact]
+        public void IsUpdateCapped_WhenNoCap_IsFalse()
+        {
+            var vm = MakeCappedRow(
+                "System.Text.Json",
+                installed: "8.0.3",
+                versions: new[] { "8.0.3", "9.0.0" },
+                cap: null);
+
+            Assert.False(vm.IsUpdateCappedByTargetFramework);
         }
 
         [Fact]

@@ -369,6 +369,43 @@ namespace NuGetManagerSlim.Tests.ViewModels
         }
 
         [Fact]
+        public void ViewMode_SetToDeprecated_FlipsInstalledAndDeprecatedFilters()
+        {
+            var (vm, _, _, _) = CreateViewModel();
+            vm.ViewMode = PackageViewMode.Deprecated;
+            Assert.True(vm.FilterInstalled);
+            Assert.True(vm.FilterDeprecated);
+            Assert.False(vm.FilterVulnerable);
+            Assert.False(vm.FilterUpdates);
+            Assert.Equal(PackageViewMode.Deprecated, vm.ViewMode);
+        }
+
+        [Fact]
+        public void ViewMode_SetFromDeprecatedToBrowse_ClearsFilters()
+        {
+            var (vm, _, _, _) = CreateViewModel();
+            vm.ViewMode = PackageViewMode.Deprecated;
+            vm.ViewMode = PackageViewMode.Browse;
+            Assert.False(vm.FilterInstalled);
+            Assert.False(vm.FilterDeprecated);
+            Assert.Equal(PackageViewMode.Browse, vm.ViewMode);
+        }
+
+        [Fact]
+        public async Task ClearCurrentProject_PreservesDeprecatedViewMode()
+        {
+            var (vm, _, _, _) = CreateViewModel();
+            await vm.InitializeAsync(CancellationToken.None);
+            await vm.SetCurrentProjectAsync(@"C:\MyApp\MyApp.csproj", "MyApp");
+            vm.ViewMode = PackageViewMode.Deprecated;
+
+            vm.ClearCurrentProject();
+
+            Assert.Equal(PackageViewMode.Deprecated, vm.ViewMode);
+            Assert.True(vm.FilterDeprecated);
+        }
+
+        [Fact]
         public async Task InitializeAsync_RestoresSavedViewMode()
         {
             // Issue #23: VS persists the view-mode menu controller's anchor icon

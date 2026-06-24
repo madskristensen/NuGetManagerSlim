@@ -16,6 +16,15 @@ namespace NuGetManagerSlim.Services
             ProjectScopeModel scope,
             CancellationToken cancellationToken);
 
+        // Resolves the maximum .NET major an update may target for the given
+        // scope, based on the project(s) target framework (issue #27). Returns
+        // null when no meaningful cap applies (e.g. .NET Framework / .NET Standard
+        // targets, or a multi-target/solution scope where any target lacks a
+        // .NET major). The most conservative (minimum) recognized major wins.
+        Task<int?> ResolveTargetFrameworkMajorCapAsync(
+            ProjectScopeModel scope,
+            CancellationToken cancellationToken);
+
         // Returns the installed version of `packageId` in each of the
         // projects covered by `scope`. Projects without the package are
         // included with a null version so the caller can render an

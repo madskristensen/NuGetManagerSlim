@@ -9,9 +9,9 @@ namespace NuGetManagerSlim.Services
 {
     /// <summary>
     /// Persists the last selected view mode (All packages / Installed / Updates /
-    /// Vulnerable) so it can be restored on the next session. Visual Studio
-    /// independently persists the view-mode menu controller's anchor icon across
-    /// restarts, so without restoring the mode the toolbar icon, the dropdown
+    /// Vulnerable / Deprecated) so it can be restored on the next session. Visual
+    /// Studio independently persists the view-mode menu controller's anchor icon
+    /// across restarts, so without restoring the mode the toolbar icon, the dropdown
     /// check mark, and the package list end up disagreeing on startup (issue #23).
     /// Storage is a single JSON file under %LocalAppData%.
     /// </summary>

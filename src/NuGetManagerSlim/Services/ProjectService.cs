@@ -379,6 +379,70 @@ namespace NuGetManagerSlim.Services
             return result;
         }
 
+        public async Task<int?> ResolveTargetFrameworkMajorCapAsync(
+            ProjectScopeModel scope,
+            CancellationToken cancellationToken)
+        {
+            if (scope == null) return null;
+
+            var projectPaths = ResolveScopePaths(scope);
+            if (projectPaths.Count == 0) return null;
+
+            var frameworks = new List<string>();
+            foreach (var projectPath in projectPaths)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                frameworks.AddRange(await ReadTargetFrameworksAsync(projectPath).ConfigureAwait(false));
+            }
+
+            return TargetFrameworkCap.ResolveCap(frameworks);
+        }
+
+        // Reads the declared target framework moniker(s) from a project file:
+        // SDK-style <TargetFramework> / <TargetFrameworks> (short monikers like
+        // net8.0) and the legacy non-SDK <TargetFrameworkVersion> (e.g. v4.8).
+        // Best-effort: returns an empty list when the file is missing or unreadable.
+        private static Task<IReadOnlyList<string>> ReadTargetFrameworksAsync(string projectFullPath)
+        {
+            return Task.Run<IReadOnlyList<string>>(() =>
+            {
+                var result = new List<string>();
+                if (string.IsNullOrEmpty(projectFullPath) || !File.Exists(projectFullPath))
+                    return result;
+
+                XDocument? doc;
+                try { doc = XDocument.Load(projectFullPath); }
+                catch { return result; }
+
+                if (doc?.Root == null) return result;
+
+                foreach (var element in doc.Descendants())
+                {
+                    var name = element.Name.LocalName;
+                    if (string.Equals(name, "TargetFramework", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(name, "TargetFrameworkVersion", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var value = element.Value?.Trim();
+                        if (!string.IsNullOrEmpty(value)) result.Add(value);
+                    }
+                    else if (string.Equals(name, "TargetFrameworks", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var value = element.Value?.Trim();
+                        if (!string.IsNullOrEmpty(value))
+                        {
+                            foreach (var tfm in value.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries))
+                            {
+                                var trimmed = tfm.Trim();
+                                if (trimmed.Length > 0) result.Add(trimmed);
+                            }
+                        }
+                    }
+                }
+
+                return result;
+            });
+        }
+
         // Dedupe by package id within a single project (e.g. the same id
         // appears in both PackageReference and packages.config). Keeps the
         // highest installed version observed.

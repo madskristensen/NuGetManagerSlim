@@ -10,6 +10,19 @@ namespace NuGetManagerSlim.Models
         public NuGetVersion? InstalledVersion { get; init; }
         public NuGetVersion? LatestStableVersion { get; init; }
         public NuGetVersion? LatestPrereleaseVersion { get; init; }
+
+        // Highest known stable / prerelease version per major version number,
+        // derived from the full version list during enrichment. Drives the
+        // target-framework update cap (issue #27): when a project targets a
+        // specific .NET major, the recommended update for runtime-coupled
+        // packages is the highest version whose major is within the cap, which
+        // can't be answered from LatestStableVersion alone. The map is
+        // framework-independent so it stays compatible with the global metadata
+        // cache; the cap itself is applied per project at display time.
+        public IReadOnlyDictionary<int, NuGetVersion> MaxStableByMajor { get; init; }
+            = new Dictionary<int, NuGetVersion>();
+        public IReadOnlyDictionary<int, NuGetVersion> MaxPrereleaseByMajor { get; init; }
+            = new Dictionary<int, NuGetVersion>();
         public string? Description { get; init; }
         public string? Authors { get; init; }
         public string? LicenseExpression { get; init; }
@@ -56,6 +69,8 @@ namespace NuGetManagerSlim.Models
             InstalledVersion = InstalledVersion,
             LatestStableVersion = LatestStableVersion,
             LatestPrereleaseVersion = LatestPrereleaseVersion,
+            MaxStableByMajor = MaxStableByMajor,
+            MaxPrereleaseByMajor = MaxPrereleaseByMajor,
             Description = Description,
             Authors = Authors,
             LicenseExpression = LicenseExpression,
@@ -86,6 +101,8 @@ namespace NuGetManagerSlim.Models
             InstalledVersion = InstalledVersion,
             LatestStableVersion = LatestStableVersion,
             LatestPrereleaseVersion = LatestPrereleaseVersion,
+            MaxStableByMajor = MaxStableByMajor,
+            MaxPrereleaseByMajor = MaxPrereleaseByMajor,
             Description = Description,
             Authors = Authors,
             LicenseExpression = LicenseExpression,

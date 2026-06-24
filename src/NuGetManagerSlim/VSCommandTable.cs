@@ -38,6 +38,7 @@ namespace NuGetManagerSlim
         public const int ViewModeInstalledCommand = 0x0211;
         public const int ViewModeUpdatesCommand = 0x0212;
         public const int ViewModeVulnerableCommand = 0x0213;
+        public const int ViewModeDeprecatedCommand = 0x0214;
         public const int RefreshCommand = 0x0203;
         public const int OpenForProjectCommand = 0x0204;
         public const int ProjectContextGroup = 0x1200;

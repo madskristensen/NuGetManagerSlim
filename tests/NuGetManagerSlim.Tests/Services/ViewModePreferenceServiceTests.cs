@@ -52,6 +52,15 @@ namespace NuGetManagerSlim.Tests.Services
         }
 
         [Fact]
+        public async Task SaveAsync_RoundTripsDeprecatedMode()
+        {
+            var svc = CreateService();
+            await svc.SaveAsync(PackageViewMode.Deprecated, CancellationToken.None);
+
+            Assert.Equal(PackageViewMode.Deprecated, await svc.GetAsync(CancellationToken.None));
+        }
+
+        [Fact]
         public async Task GetAsync_OnCorruptFile_ReturnsNull()
         {
             File.WriteAllText(_tempFile, "{ not valid json");

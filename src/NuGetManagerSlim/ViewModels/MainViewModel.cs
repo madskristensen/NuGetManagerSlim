@@ -21,6 +21,7 @@ namespace NuGetManagerSlim.ViewModels
         Installed,
         Updates,
         Vulnerable,
+        Deprecated,
     }
 
     public sealed partial class MainViewModel : ObservableObject, IDisposable
@@ -79,6 +80,7 @@ namespace NuGetManagerSlim.ViewModels
         [ObservableProperty] private bool _filterInstalled;
         [ObservableProperty] private bool _filterUpdates;
         [ObservableProperty] private bool _filterVulnerable;
+        [ObservableProperty] private bool _filterDeprecated;
         [ObservableProperty] private bool _filterPrerelease;
         [ObservableProperty] private bool _isLoading;
         [ObservableProperty] private bool _isRemoteLoading;
@@ -108,6 +110,7 @@ namespace NuGetManagerSlim.ViewModels
         {
             get
             {
+                if (FilterDeprecated) return PackageViewMode.Deprecated;
                 if (FilterVulnerable) return PackageViewMode.Vulnerable;
                 if (FilterUpdates) return PackageViewMode.Updates;
                 if (FilterInstalled) return PackageViewMode.Installed;
@@ -146,10 +149,12 @@ namespace NuGetManagerSlim.ViewModels
             try
             {
                 FilterVulnerable = value == PackageViewMode.Vulnerable;
+                FilterDeprecated = value == PackageViewMode.Deprecated;
                 FilterUpdates = value == PackageViewMode.Updates;
                 FilterInstalled = value == PackageViewMode.Installed
                     || value == PackageViewMode.Updates
-                    || value == PackageViewMode.Vulnerable;
+                    || value == PackageViewMode.Vulnerable
+                    || value == PackageViewMode.Deprecated;
             }
             finally
             {
@@ -463,6 +468,12 @@ namespace NuGetManagerSlim.ViewModels
             if (_suppressFilterReload) return;
             _ = ReloadPackagesAsync();
         }
+        partial void OnFilterDeprecatedChanged(bool value)
+        {
+            OnPropertyChanged(nameof(ViewMode));
+            if (_suppressFilterReload) return;
+            _ = ReloadPackagesAsync();
+        }
         partial void OnFilterPrereleaseChanged(bool value) => _ = ReloadPackagesAsync();
 
         // Builds a row pre-configured with the current prerelease preference so
@@ -471,7 +482,49 @@ namespace NuGetManagerSlim.ViewModels
         // every reload (including when the prerelease toggle changes), so setting
         // the flag at construction is sufficient.
         private PackageRowViewModel CreateRow(PackageModel model) =>
-            new(model) { IncludePrerelease = FilterPrerelease };
+            new(model)
+            {
+                IncludePrerelease = FilterPrerelease,
+                TargetFrameworkMajorCap = _targetFrameworkMajorCap,
+            };
+
+        // Cached target-framework update cap for the current scope (issue #27).
+        // Resolved from the project file(s) and refreshed when the scope changes
+        // or on a user-initiated Refresh, so capping reflects TFM edits without
+        // re-reading the csproj on every keystroke.
+        private int? _targetFrameworkMajorCap;
+        private string? _capResolvedForKey;
+
+        private async Task RefreshTargetFrameworkCapAsync(bool force, CancellationToken cancellationToken)
+        {
+            var key = CurrentProject == null
+                ? null
+                : CurrentProject.IsSolutionScope
+                    ? "solution:" + string.Join(";", CurrentProject.ProjectFullPaths)
+                    : "project:" + CurrentProject.ProjectFullPath;
+
+            if (!force && key == _capResolvedForKey) return;
+
+            int? cap = null;
+            if (CurrentProject != null)
+            {
+                try
+                {
+                    cap = await _projectService
+                        .ResolveTargetFrameworkMajorCapAsync(CurrentProject, cancellationToken)
+                        .ConfigureAwait(true);
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex)
+                {
+                    await ex.LogAsync();
+                    cap = null;
+                }
+            }
+
+            _targetFrameworkMajorCap = cap;
+            _capResolvedForKey = key;
+        }
 
 
         partial void OnIsRemoteLoadingChanged(bool value)
@@ -565,6 +618,8 @@ namespace NuGetManagerSlim.ViewModels
 
             try
             {
+                await RefreshTargetFrameworkCapAsync(force: false, ct).ConfigureAwait(true);
+
                 if (!FilterInstalled && !FilterUpdates)
                 {
                     // Cache hit: skip the skeleton/loading flash and render the
@@ -671,6 +726,8 @@ namespace NuGetManagerSlim.ViewModels
         {
             if (CurrentProject == null) return;
 
+            await RefreshTargetFrameworkCapAsync(force: false, cancellationToken).ConfigureAwait(true);
+
             // Abort any transitive load still running from a previous filter
             // state. The Installed path below starts a fresh one; the Updates and
             // Vulnerable paths intentionally don't, so without this an in-flight
@@ -743,6 +800,58 @@ namespace NuGetManagerSlim.ViewModels
                     // background metadata pass the Installed/Browse views use so the
                     // rows get the full set of details. Cached metadata makes this a
                     // cheap set of cache hits on repeat visits.
+                    EnrichInstalledInBackground(Packages.ToList(), ReplaceCts(ref _enrichCts));
+                    return;
+                }
+
+                if (FilterDeprecated)
+                {
+                    // Deprecations, like vulnerabilities, can surface from
+                    // transitive dependencies, so scan those too (mirrors the
+                    // Vulnerable view and the stock manager's behavior).
+                    IReadOnlyList<PackageModel> transitive;
+                    try
+                    {
+                        transitive = await _projectService.GetTransitivePackagesAsync(CurrentProject, cancellationToken).ConfigureAwait(true);
+                    }
+                    catch (OperationCanceledException) { throw; }
+                    catch (Exception ex)
+                    {
+                        await ex.LogAsync();
+                        transitive = [];
+                    }
+
+                    var seen = new HashSet<string>(rows.Select(r => r.PackageId), StringComparer.OrdinalIgnoreCase);
+                    foreach (var pkg in transitive)
+                    {
+                        if (!string.IsNullOrWhiteSpace(searchQuery)
+                            && pkg.PackageId.IndexOf(searchQuery, StringComparison.OrdinalIgnoreCase) < 0)
+                            continue;
+                        if (seen.Add(pkg.PackageId))
+                            rows.Add(CreateRow(pkg));
+                    }
+
+                    await EnrichDeprecationAsync(rows, cancellationToken).ConfigureAwait(true);
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    rows = rows.Where(r => r.IsDeprecated).ToList();
+
+                    // Apply any cached latest-version metadata up front so icons,
+                    // descriptions, and the update badge render immediately for
+                    // packages already seen in another view (issue #24).
+                    foreach (var row in rows)
+                    {
+                        if (_feedService.TryGetCachedLatestMetadata(row.PackageId, out var cachedMeta) && cachedMeta != null)
+                            row.ApplyMetadata(cachedMeta);
+                    }
+
+                    _packages.ReplaceAll(rows.OrderBy(r => r.IsTransitive).ThenBy(r => r.PackageId));
+                    SeedMruFromInstalled(installed);
+
+                    // Run the same background metadata pass the Installed/Browse
+                    // views use so the rows get the full set of details (icon,
+                    // description, update badge). Cached metadata makes this a cheap
+                    // set of cache hits on repeat visits.
                     EnrichInstalledInBackground(Packages.ToList(), ReplaceCts(ref _enrichCts));
                     return;
                 }
@@ -874,6 +983,34 @@ namespace NuGetManagerSlim.ViewModels
                     var meta = await _feedService.GetPackageMetadataAsync(row.PackageId, version, ct).ConfigureAwait(false);
                     if (meta == null || ct.IsCancellationRequested) return;
                     row.ApplyVulnerabilities(meta.Vulnerabilities);
+                }
+                catch (OperationCanceledException) { }
+                catch (Exception ex) { await ex.LogAsync(); }
+                finally { s_enrichmentThrottle.Release(); }
+            });
+            try { await Task.WhenAll(tasks).ConfigureAwait(false); }
+            catch (OperationCanceledException) { }
+        }
+
+        // Resolves each installed package's deprecation status for its installed
+        // version. Used by the Deprecated view, which must know whether the
+        // *installed* version (not just the latest) is deprecated before it can
+        // decide whether to keep the row.
+        private async Task EnrichDeprecationAsync(IReadOnlyList<PackageRowViewModel> rows, CancellationToken ct)
+        {
+            if (rows == null || rows.Count == 0) return;
+            await TaskScheduler.Default;
+            var tasks = rows.Select(async row =>
+            {
+                if (ct.IsCancellationRequested) return;
+                var version = row.InstalledVersion;
+                if (version == null) return;
+                await s_enrichmentThrottle.WaitAsync(ct).ConfigureAwait(false);
+                try
+                {
+                    var meta = await _feedService.GetPackageMetadataAsync(row.PackageId, version, ct).ConfigureAwait(false);
+                    if (meta == null || ct.IsCancellationRequested) return;
+                    row.ApplyMetadata(meta);
                 }
                 catch (OperationCanceledException) { }
                 catch (Exception ex) { await ex.LogAsync(); }
@@ -1229,6 +1366,7 @@ namespace NuGetManagerSlim.ViewModels
             // the live feed, then reload.
             _feedService.InvalidateCache();
             OperationLog.Clear();
+            _capResolvedForKey = null;
             await ReloadPackagesAsync();
         }
 

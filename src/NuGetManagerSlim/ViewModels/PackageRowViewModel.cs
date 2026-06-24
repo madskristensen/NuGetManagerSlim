@@ -54,6 +54,8 @@ namespace NuGetManagerSlim.ViewModels
                 InstalledVersion = _model.InstalledVersion,
                 LatestStableVersion = _model.LatestStableVersion ?? metadata.LatestStableVersion,
                 LatestPrereleaseVersion = _model.LatestPrereleaseVersion ?? metadata.LatestPrereleaseVersion,
+                MaxStableByMajor = metadata.MaxStableByMajor.Count > 0 ? metadata.MaxStableByMajor : _model.MaxStableByMajor,
+                MaxPrereleaseByMajor = metadata.MaxPrereleaseByMajor.Count > 0 ? metadata.MaxPrereleaseByMajor : _model.MaxPrereleaseByMajor,
                 Description = _model.Description ?? metadata.Description,
                 Authors = string.IsNullOrEmpty(_model.Authors) ? metadata.Authors : _model.Authors,
                 LicenseExpression = _model.LicenseExpression ?? metadata.LicenseExpression,
@@ -78,6 +80,8 @@ namespace NuGetManagerSlim.ViewModels
             OnPropertyChanged(nameof(UpdateCandidateVersion));
             OnPropertyChanged(nameof(VersionInformation));
             OnPropertyChanged(nameof(UpdateBadge));
+            OnPropertyChanged(nameof(IsUpdateCappedByTargetFramework));
+            OnPropertyChanged(nameof(UpdateCapTooltip));
             OnPropertyChanged(nameof(DownloadCountDisplay));
             OnPropertyChanged(nameof(IsDeprecated));
             OnPropertyChanged(nameof(DeprecationTooltip));
@@ -115,14 +119,61 @@ namespace NuGetManagerSlim.ViewModels
                 OnPropertyChanged(nameof(HasUpdate));
                 OnPropertyChanged(nameof(VersionInformation));
                 OnPropertyChanged(nameof(UpdateBadge));
+                OnPropertyChanged(nameof(IsUpdateCappedByTargetFramework));
+                OnPropertyChanged(nameof(UpdateCapTooltip));
             }
         }
         private bool _includePrerelease;
 
+        // Maximum .NET major an update may move to for runtime-coupled package
+        // families (issue #27). Set from the project's target framework on each
+        // reload. Null means no cap (e.g. .NET Framework / .NET Standard projects,
+        // or packages outside the capped families), preserving prior behavior.
+        public int? TargetFrameworkMajorCap
+        {
+            get => _targetFrameworkMajorCap;
+            set
+            {
+                if (_targetFrameworkMajorCap == value) return;
+                _targetFrameworkMajorCap = value;
+                OnPropertyChanged(nameof(TargetFrameworkMajorCap));
+                OnPropertyChanged(nameof(UpdateCandidateVersion));
+                OnPropertyChanged(nameof(HasUpdate));
+                OnPropertyChanged(nameof(VersionInformation));
+                OnPropertyChanged(nameof(UpdateBadge));
+                OnPropertyChanged(nameof(IsUpdateCappedByTargetFramework));
+                OnPropertyChanged(nameof(UpdateCapTooltip));
+            }
+        }
+        private int? _targetFrameworkMajorCap;
+
         // The version an update would move the installed package to: the latest
         // stable, or - when prereleases are included - the highest of the stable
-        // and prerelease candidates. Null when no newer version is known.
+        // and prerelease candidates. Null when no newer version is known. When a
+        // target-framework cap applies to a runtime-coupled family, the candidate
+        // is the highest version whose major is within the cap, so the inline
+        // update / badge / bulk update never jump above the project's .NET major
+        // (issue #27). The detail-pane version dropdown still lists every version,
+        // so going higher remains a deliberate, explicit choice.
         public NuGetVersion? UpdateCandidateVersion
+        {
+            get
+            {
+                if (TargetFrameworkMajorCap is int cap
+                    && TargetFrameworkCap.IsCappedFamily(_model.PackageId))
+                {
+                    return SelectCappedCandidate(cap);
+                }
+
+                return UncappedCandidate;
+            }
+        }
+
+        // The version an update would target if no target-framework cap applied:
+        // latest stable, or the higher of stable / prerelease when prereleases are
+        // included. Used both as the default path and to detect when the cap is
+        // actually holding a newer version back (for the discoverability tooltip).
+        private NuGetVersion? UncappedCandidate
         {
             get
             {
@@ -133,6 +184,39 @@ namespace NuGetManagerSlim.ViewModels
                 if (pre == null) return stable;
                 return pre > stable ? pre : stable;
             }
+        }
+
+        // Highest version within the cap, honoring the include-prerelease toggle.
+        // Falls back to the uncapped latest when the per-major maps are empty
+        // (e.g. metadata not yet enriched) so behavior degrades gracefully.
+        private NuGetVersion? SelectCappedCandidate(int cap)
+        {
+            NuGetVersion? best = null;
+            foreach (var kvp in _model.MaxStableByMajor)
+            {
+                if (kvp.Key > cap) continue;
+                if (best == null || kvp.Value > best) best = kvp.Value;
+            }
+
+            if (_includePrerelease)
+            {
+                foreach (var kvp in _model.MaxPrereleaseByMajor)
+                {
+                    if (kvp.Key > cap) continue;
+                    if (best == null || kvp.Value > best) best = kvp.Value;
+                }
+            }
+
+            if (best != null) return best;
+
+            // No per-major data: fall back to the uncapped latest, but only when
+            // it doesn't exceed the cap, so an un-enriched row never suggests a
+            // version above the target framework's major.
+            var stable = _model.LatestStableVersion;
+            var pre = _includePrerelease ? _model.LatestPrereleaseVersion : null;
+            var fallback = stable;
+            if (pre != null && (fallback == null || pre > fallback)) fallback = pre;
+            return fallback != null && fallback.Major <= cap ? fallback : null;
         }
 
         public bool HasUpdate => IsInstalled
@@ -172,6 +256,38 @@ namespace NuGetManagerSlim.ViewModels
         }
 
         public string UpdateBadge => HasUpdate ? $"→ {UpdateCandidateVersion}" : string.Empty;
+
+        // True when a target-framework cap is actively holding back a newer
+        // version than the one offered (issue #27). Drives the row's "why isn't
+        // it offering the newest?" tooltip so the capped arrow isn't surprising.
+        public bool IsUpdateCappedByTargetFramework
+        {
+            get
+            {
+                if (TargetFrameworkMajorCap is not int)
+                    return false;
+                if (!TargetFrameworkCap.IsCappedFamily(_model.PackageId))
+                    return false;
+
+                var capped = UpdateCandidateVersion;
+                var uncapped = UncappedCandidate;
+                return uncapped != null
+                    && (capped == null || uncapped > capped);
+            }
+        }
+
+        public string UpdateCapTooltip
+        {
+            get
+            {
+                if (!IsUpdateCappedByTargetFramework || TargetFrameworkMajorCap is not int cap)
+                    return string.Empty;
+
+                var newer = UncappedCandidate;
+                return $"Updates are limited to {cap}.x to match this project's target framework. "
+                    + $"A newer version (v{newer}) is available - open the package and pick it from the version list to update anyway.";
+            }
+        }
 
         public string AuthorDisplay => string.IsNullOrEmpty(_model.Authors) ? string.Empty : $"by {_model.Authors}";
 

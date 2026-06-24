@@ -83,6 +83,16 @@
         </Strings>
       </Button>
 
+      <Button guid="NuGetManagerSlim" id="ViewModeDeprecatedCommand" priority="0x0500" type="Button">
+        <Parent guid="NuGetManagerSlim" id="ViewModeMenuGroup" />
+        <Icon guid="ImageCatalogGuid" id="StatusNo" />
+        <CommandFlag>IconIsMoniker</CommandFlag>
+        <Strings>
+          <ButtonText>Deprecated</ButtonText>
+          <ToolTipText>Show only installed packages that are deprecated</ToolTipText>
+        </Strings>
+      </Button>
+
       <Button guid="NuGetManagerSlim" id="RefreshCommand" priority="0x0100" type="Button">
         <Parent guid="NuGetManagerSlim" id="NuGetQuickManagerToolbarRefreshGroup" />
         <Icon guid="ImageCatalogGuid" id="Refresh" />
@@ -139,6 +149,7 @@
       <IDSymbol name="ViewModeInstalledCommand"             value="0x0211" />
       <IDSymbol name="ViewModeUpdatesCommand"               value="0x0212" />
       <IDSymbol name="ViewModeVulnerableCommand"            value="0x0213" />
+      <IDSymbol name="ViewModeDeprecatedCommand"           value="0x0214" />
       <IDSymbol name="RefreshCommand"                       value="0x0203" />
       <IDSymbol name="OpenForProjectCommand"                value="0x0204" />
 

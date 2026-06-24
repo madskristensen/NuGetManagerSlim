@@ -64,6 +64,10 @@ Useful filters:
 
 Install, update, and uninstall directly from the row. No dialog, no confirmation modal in the way - operations stream their progress in the status area while the rest of the list stays interactive.
 
+### Framework-aware updates
+
+For runtime-coupled package families (`System.*`, `Microsoft.Extensions.*`, `Microsoft.AspNetCore.*`), the suggested update stays within your project's target-framework major. A project on `net8.0` is offered the newest `8.x` instead of jumping to `9.0.0`, so the inline update icon and bulk update never push a runtime mismatch. When a newer major is held back, an info icon next to the version explains why - and you can still pick any version from the detail pane's version dropdown to update past the cap on purpose.
+
 ### See your transitive dependencies
 
 Indirect (transitive) packages appear under their own "Transitive packages" header in the Installed view, with a **required by** label so you know exactly which direct dependency pulled them in. They are read-only; to change a transitive version, update the direct dependency that requires it.
@@ -91,6 +95,7 @@ The version dropdown lists every published version (stable by default, prereleas
 | Toggle prerelease versions                          | The **Include prerelease** checkbox at the bottom                             |
 | Switch between All / Installed / Updates            | The scope dropdown at the top of the tool window                              |
 | See which package pulled in a transitive dependency | Look for the **required by** label under the package id                       |
+| Update a runtime package past the framework cap     | Open the package and pick the version from the detail pane's version dropdown  |
 | Clear cached feed results                           | Use the **Refresh** button in the toolbar                                     |
 | Reopen the window after closing it                  | **View > Other Windows > NuGet Manager (Slim)**                               |
 
@@ -113,6 +118,9 @@ A: Some packages publish an `iconUrl` that resolves to nothing or to a non-image
 
 **Q: Does it work with multi-targeted projects?**  
 A: Yes. The installed list reflects the union of packages across target frameworks, and version operations write to the project file the same way the built-in manager does.
+
+**Q: Why is it offering an older major than the latest version?**  
+A: For runtime-coupled families (`System.*`, `Microsoft.Extensions.*`, `Microsoft.AspNetCore.*`), the suggested update is capped to your project's target-framework major - a `net8.0` project gets the latest `8.x` rather than `9.0.0`, which avoids pulling in a runtime newer than the framework you target. An info icon next to the version flags when this is happening. To update past the cap, open the package and choose the version you want from the detail pane's version dropdown.
 
 **Q: Can I use it without a solution open?**  
 A: The tool window opens, but most operations require an active project or solution to install or update against.
