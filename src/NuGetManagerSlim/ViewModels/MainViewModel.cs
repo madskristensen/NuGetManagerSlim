@@ -723,8 +723,27 @@ namespace NuGetManagerSlim.ViewModels
                     cancellationToken.ThrowIfCancellationRequested();
 
                     rows = rows.Where(r => r.HasVulnerabilities).ToList();
+
+                    // Apply any cached latest-version metadata up front so icons,
+                    // descriptions, and the update badge render immediately for
+                    // packages already seen in another view, instead of staying
+                    // blank until the background pass lands (issue #24).
+                    foreach (var row in rows)
+                    {
+                        if (_feedService.TryGetCachedLatestMetadata(row.PackageId, out var cachedMeta) && cachedMeta != null)
+                            row.ApplyMetadata(cachedMeta);
+                    }
+
                     _packages.ReplaceAll(rows.OrderBy(r => r.IsTransitive).ThenBy(r => r.PackageId));
                     SeedMruFromInstalled(installed);
+
+                    // The Vulnerable view previously enriched only vulnerability
+                    // advisories, so rows showed no icon, description, or
+                    // latest-version/update badge (issue #24). Run the same
+                    // background metadata pass the Installed/Browse views use so the
+                    // rows get the full set of details. Cached metadata makes this a
+                    // cheap set of cache hits on repeat visits.
+                    EnrichInstalledInBackground(Packages.ToList(), ReplaceCts(ref _enrichCts));
                     return;
                 }
 
@@ -762,9 +781,11 @@ namespace NuGetManagerSlim.ViewModels
 
                 SeedMruFromInstalled(installed);
 
-                // The Updates view resolves metadata synchronously above, so it
-                // neither needs nor should disturb the background enrichment scope.
-                if (!FilterUpdates)
+                // Background-enrich the displayed rows in every list view. The
+                // Updates view runs this too so the vulnerability badge shows there
+                // as well (issue #24); its latest-version data is already cached
+                // from the synchronous pass above, so the extra fetch is just a
+                // cache hit.
                 {
                     // One enrichment scope covers both the direct rows enriched
                     // here and any transitive rows appended later by
@@ -782,8 +803,10 @@ namespace NuGetManagerSlim.ViewModels
                     // Transitive packages are read from project.assets.json which
                     // can be slow on first cold restore. Kick the load off in the
                     // background so the direct-package list lands immediately;
-                    // transitives append to the list once parsed.
-                    if (FilterInstalled)
+                    // transitives append to the list once parsed. Browse and Updates
+                    // never list transitive rows, so only the plain Installed view
+                    // loads them.
+                    if (FilterInstalled && !FilterUpdates)
                     {
                         LoadTransitivesInBackground(CurrentProject, enrichToken);
                     }

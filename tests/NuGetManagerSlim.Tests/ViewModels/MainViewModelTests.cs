@@ -217,6 +217,84 @@ namespace NuGetManagerSlim.Tests.ViewModels
         }
 
         [Fact]
+        public async Task VulnerableView_EnrichesFullMetadata()
+        {
+            // Regression test for issue #24: the Vulnerable view used to enrich
+            // only vulnerability advisories, so rows showed no icon, description,
+            // or latest-version/update badge. It must now run the same
+            // installed-metadata enrichment the Installed/Browse views use so the
+            // displayed rows carry their full set of details.
+            var version = NuGetVersion.Parse("1.0.0");
+            var installed = new List<PackageModel>
+            {
+                new() { PackageId = "VulnerablePkg", InstalledVersion = version },
+            };
+
+            var projMock = new Mock<IProjectService>();
+            var feedMock = new Mock<INuGetFeedService>();
+            var restoreMock = new Mock<IRestoreMonitorService>();
+
+            feedMock.Setup(f => f.GetSourcesAsync(It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<PackageSourceModel>());
+            projMock.Setup(p => p.GetInstalledPackagesAsync(It.IsAny<ProjectScopeModel>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(installed);
+            projMock.Setup(p => p.GetTransitivePackagesAsync(It.IsAny<ProjectScopeModel>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<PackageModel>());
+
+            // The installed version carries an advisory, so the row survives the
+            // Vulnerable filter.
+            feedMock.Setup(f => f.GetPackageMetadataAsync("VulnerablePkg", It.IsAny<NuGetVersion>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new PackageModel
+                {
+                    PackageId = "VulnerablePkg",
+                    Vulnerabilities = new[]
+                    {
+                        new PackageVulnerabilityInfo { Severity = 3, AdvisoryUrl = "https://example.com/a" },
+                    },
+                });
+
+            feedMock.Setup(f => f.GetInstalledEnrichmentAsync("VulnerablePkg", version, It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new InstalledEnrichment
+                {
+                    Latest = new PackageModel
+                    {
+                        PackageId = "VulnerablePkg",
+                        Description = "A package",
+                        LatestStableVersion = NuGetVersion.Parse("2.0.0"),
+                    },
+                    InstalledVulnerabilities = new[]
+                    {
+                        new PackageVulnerabilityInfo { Severity = 3, AdvisoryUrl = "https://example.com/a" },
+                    },
+                });
+
+            var vm = new MainViewModel(projMock.Object, feedMock.Object, restoreMock.Object);
+            await vm.InitializeAsync(CancellationToken.None);
+            await vm.SetCurrentProjectAsync(@"C:\MyApp\MyApp.csproj", "MyApp");
+
+            vm.ViewMode = PackageViewMode.Vulnerable;
+
+            PackageRowViewModel? row = null;
+            for (int i = 0; i < 200; i++)
+            {
+                row = vm.Packages.FirstOrDefault(p => p.PackageId == "VulnerablePkg");
+                if (!vm.IsLoading && row != null && row.HasVulnerabilities && row.LatestStableVersion != null)
+                    break;
+                await Task.Delay(10);
+            }
+
+            Assert.NotNull(row);
+            Assert.True(row!.HasVulnerabilities);
+            Assert.Equal(NuGetVersion.Parse("2.0.0"), row.LatestStableVersion);
+            feedMock.Verify(
+                f => f.GetInstalledEnrichmentAsync("VulnerablePkg", version, It.IsAny<bool>(), It.IsAny<CancellationToken>()),
+                Times.AtLeastOnce);
+            feedMock.Verify(
+                f => f.GetInstalledEnrichmentAsync("VulnerablePkg", version, It.IsAny<bool>(), It.IsAny<CancellationToken>()),
+                Times.AtLeastOnce);
+        }
+
+        [Fact]
         public void ViewMode_SetToBrowse_ClearsFilters()
         {
             var (vm, _, _, _) = CreateViewModel();
