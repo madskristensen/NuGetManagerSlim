@@ -32,6 +32,7 @@ It coexists with the built-in NuGet Package Manager. Both can be open at the sam
 | Search                            | Blocks while loading            | Async, non-blocking, debounced         |
 | Source filter                     | Dropdown at the top only        | Inline `source:"..."` filter chips     |
 | Transitive packages               | Buried in dependency tree       | First-class section with "required by" |
+| Deprecated / vulnerable packages  | Surfaced only in dedicated tabs  | Badged inline plus dedicated views     |
 | UI surface                        | Modal-style document window     | Dockable tool window                   |
 
 ## What Can You Do?
@@ -44,7 +45,7 @@ Installed packages pin to the top of the Browse list with a clear "Installed" ba
 
 ### Switch scope in a click
 
-Toggle the view between **All packages**, **Installed**, and **Updates available** from the toolbar. The list re-renders instantly without re-querying the feed.
+Toggle the view between **All packages**, **Installed**, **Updates available**, **Vulnerable**, and **Deprecated** from the toolbar. The list re-renders instantly without re-querying the feed, and your last selected view is remembered and restored the next time you open the tool window.
 
 ![Scope selector](art/scope.png)
 
@@ -67,6 +68,10 @@ Install, update, and uninstall directly from the row. No dialog, no confirmation
 ### Framework-aware updates
 
 For runtime-coupled package families (`System.*`, `Microsoft.Extensions.*`, `Microsoft.AspNetCore.*`), the suggested update stays within your project's target-framework major. A project on `net8.0` is offered the newest `8.x` instead of jumping to `9.0.0`, so the inline update icon and bulk update never push a runtime mismatch. When a newer major is held back, an info icon next to the version explains why - and you can still pick any version from the detail pane's version dropdown to update past the cap on purpose.
+
+### Spot deprecated and vulnerable packages
+
+Packages the feed reports as **deprecated** or **vulnerable** are badged inline in every list view - not just in a dedicated tab - so risky dependencies stand out at a glance. The detail pane explains the deprecation reason and flags affected versions, and the version dropdown marks individual versions as deprecated or vulnerable so you can pick a safe one. Dedicated **Vulnerable** and **Deprecated** views let you scope the list to just the packages that need attention.
 
 ### See your transitive dependencies
 
@@ -93,7 +98,7 @@ The version dropdown lists every published version (stable by default, prereleas
 | Filter to a specific feed                           | Type `source:"nuget.org"` in the search box, or pick from the filter dropdown |
 | Match only the package id                           | Type `id:` followed by the partial id, e.g. `id:Serilog`                      |
 | Toggle prerelease versions                          | The **Include prerelease** checkbox at the bottom                             |
-| Switch between All / Installed / Updates            | The scope dropdown at the top of the tool window                              |
+| Switch between All / Installed / Updates / Vulnerable / Deprecated | The scope dropdown at the top of the tool window                |
 | See which package pulled in a transitive dependency | Look for the **required by** label under the package id                       |
 | Update a runtime package past the framework cap     | Open the package and pick the version from the detail pane's version dropdown  |
 | Clear cached feed results                           | Use the **Refresh** button in the toolbar                                     |
@@ -109,6 +114,9 @@ A: From your existing NuGet configuration (`NuGet.config`). No separate setup. A
 
 **Q: Are packages.config projects supported?**  
 A: Yes - both PackageReference (SDK-style) and packages.config projects are recognized for the installed list.
+
+**Q: What do the deprecated and vulnerable badges mean?**  
+A: They reflect the status the NuGet feed reports for the version you have (or the latest version when browsing). Deprecated means the author has marked the package as no longer maintained or superseded; vulnerable means a known security advisory applies. Badges appear inline in every list view, and the **Vulnerable** and **Deprecated** scopes filter the list down to just those packages. Open the package to see the reason and to pick a safer version from the version dropdown.
 
 **Q: Why are some packages marked as transitive?**  
 A: Transitive packages were pulled in by one of your direct dependencies, not added by you. They're shown for visibility (read-only) under the "Transitive packages" header. To change one, update the direct dependency that requires it.
