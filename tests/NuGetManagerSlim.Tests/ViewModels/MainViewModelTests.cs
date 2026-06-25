@@ -373,6 +373,90 @@ namespace NuGetManagerSlim.Tests.ViewModels
         }
 
         [Fact]
+        public async Task UpdatesView_EnrichesFromSingleFetch_WithoutSeparateLatestFetch()
+        {
+            // The Updates view resolves each updatable row's latest-version
+            // metadata (needed for the HasUpdate decision and the update badge)
+            // and the installed version's vulnerability badge from one
+            // GetInstalledEnrichmentAsync fetch per package. It must not also issue
+            // the latest-only GetPackageMetadataAsync(id) pass it used to run before
+            // the background enrichment, which was a redundant second registration
+            // round trip per package.
+            var version = NuGetVersion.Parse("1.0.0");
+            var installed = new List<PackageModel>
+            {
+                new() { PackageId = "UpdatablePkg", InstalledVersion = version },
+            };
+
+            var projMock = new Mock<IProjectService>();
+            var feedMock = new Mock<INuGetFeedService>();
+            var restoreMock = new Mock<IRestoreMonitorService>();
+
+            feedMock.Setup(f => f.GetSourcesAsync(It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<PackageSourceModel>());
+            projMock.Setup(p => p.GetInstalledPackagesAsync(It.IsAny<ProjectScopeModel>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(installed);
+            projMock.Setup(p => p.GetTransitivePackagesAsync(It.IsAny<ProjectScopeModel>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<PackageModel>());
+
+            // A single registration fetch yields the latest version (so the row
+            // qualifies as an update) and the installed version's advisory badge.
+            feedMock.Setup(f => f.GetInstalledEnrichmentAsync("UpdatablePkg", version, It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new InstalledEnrichment
+                {
+                    Latest = new PackageModel
+                    {
+                        PackageId = "UpdatablePkg",
+                        Description = "A package",
+                        LatestStableVersion = NuGetVersion.Parse("2.0.0"),
+                    },
+                    InstalledVulnerabilities = new[]
+                    {
+                        new PackageVulnerabilityInfo { Severity = 3, AdvisoryUrl = "https://example.com/a" },
+                    },
+                });
+
+            var vm = new MainViewModel(projMock.Object, feedMock.Object, restoreMock.Object);
+            await vm.InitializeAsync(CancellationToken.None);
+            await vm.SetCurrentProjectAsync(@"C:\MyApp\MyApp.csproj", "MyApp");
+
+            // The default Browse load pins and enriches installed packages. Let it
+            // settle, then clear the recorded invocations so the assertions below
+            // only observe the Updates view's own fetches.
+            await Task.Delay(50);
+            feedMock.Invocations.Clear();
+
+            vm.ViewMode = PackageViewMode.Updates;
+
+            PackageRowViewModel? row = null;
+            for (int i = 0; i < 200; i++)
+            {
+                row = vm.Packages.FirstOrDefault(p => p.PackageId == "UpdatablePkg");
+                if (!vm.IsLoading && row != null && row.HasUpdate && row.HasVulnerabilities)
+                    break;
+                await Task.Delay(10);
+            }
+
+            Assert.NotNull(row);
+            Assert.True(row!.HasUpdate);
+            Assert.True(row.HasVulnerabilities);
+            Assert.Equal(NuGetVersion.Parse("2.0.0"), row.LatestStableVersion);
+
+            // Let any (unwanted) follow-on background enrichment run before asserting.
+            await Task.Delay(50);
+
+            // The row is resolved from exactly one registration fetch per package...
+            feedMock.Verify(
+                f => f.GetInstalledEnrichmentAsync("UpdatablePkg", version, It.IsAny<bool>(), It.IsAny<CancellationToken>()),
+                Times.Once);
+
+            // ...and the old redundant latest-only metadata fetch is never issued.
+            feedMock.Verify(
+                f => f.GetPackageMetadataAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+                Times.Never);
+        }
+
+        [Fact]
         public void ViewMode_SetToBrowse_ClearsFilters()
         {
             var (vm, _, _, _) = CreateViewModel();

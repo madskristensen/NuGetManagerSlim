@@ -763,30 +763,8 @@ namespace NuGetManagerSlim.Services
                     }))
                     .ToList();
 
-                // PackageMetadataResource exposes per-version download counts which are
-                // typically null for most v3 feeds. Only fall back to the search resource
-                // for nuget.org - private/Azure Artifacts/GitHub feeds don't expose
-                // cumulative download counts there either, so the extra round-trip is
-                // pure overhead (and per-package, on every enrichment pass).
-                long downloadCount = latest.DownloadCount ?? 0;
-                if (downloadCount == 0 && IsNuGetOrgSource(source))
-                {
-                    try
-                    {
-                        var searchResource = await GetSearchResourceAsync(source, cancellationToken).ConfigureAwait(false);
-                        if (searchResource != null)
-                        {
-                            var hits = await searchResource.SearchAsync(
-                                "packageid:" + packageId,
-                                new SearchFilter(includePrerelease: true),
-                                0, 1, _logger, cancellationToken).ConfigureAwait(false);
-                            var hit = hits?.FirstOrDefault();
-                            if (hit?.DownloadCount != null) downloadCount = hit.DownloadCount.Value;
-                        }
-                    }
-                    catch (OperationCanceledException) { throw; }
-                    catch { /* search fallback is best-effort */ }
-                }
+                long downloadCount = await ResolveDownloadCountAsync(
+                    source, packageId, latest.DownloadCount ?? 0, cancellationToken).ConfigureAwait(false);
 
                 var (isDeprecated, deprecationReason) = await MapDeprecationAsync(latest).ConfigureAwait(false);
 
@@ -967,23 +945,10 @@ namespace NuGetManagerSlim.Services
                 // but skipped entirely when the caller already has a count for the
                 // row - that removes a redundant per-package search round trip.
                 long downloadCount = latest.DownloadCount ?? 0;
-                if (needsDownloadCount && downloadCount == 0 && IsNuGetOrgSource(source))
+                if (needsDownloadCount)
                 {
-                    try
-                    {
-                        var searchResource = await GetSearchResourceAsync(source, cancellationToken).ConfigureAwait(false);
-                        if (searchResource != null)
-                        {
-                            var hits = await searchResource.SearchAsync(
-                                "packageid:" + packageId,
-                                new SearchFilter(includePrerelease: true),
-                                0, 1, _logger, cancellationToken).ConfigureAwait(false);
-                            var hit = hits?.FirstOrDefault();
-                            if (hit?.DownloadCount != null) downloadCount = hit.DownloadCount.Value;
-                        }
-                    }
-                    catch (OperationCanceledException) { throw; }
-                    catch { /* search fallback is best-effort */ }
+                    downloadCount = await ResolveDownloadCountAsync(
+                        source, packageId, downloadCount, cancellationToken).ConfigureAwait(false);
                 }
 
                 // Deprecation is per-version: a package can be deprecated at the
@@ -1043,6 +1008,39 @@ namespace NuGetManagerSlim.Services
         {
             if (string.IsNullOrEmpty(source.Source)) return false;
             return source.Source.IndexOf("nuget.org", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        // Single source of truth for the cumulative-download-count fallback. The
+        // PackageMetadataResource exposes per-version download counts which are
+        // typically null on v3 feeds, so when we have no count we fall back to the
+        // search resource - but only for nuget.org, since private / Azure Artifacts /
+        // GitHub feeds don't expose cumulative counts there either and the extra
+        // per-package round trip would be pure overhead on every enrichment pass.
+        // Returns the original count untouched when no fallback applies or the
+        // best-effort lookup fails.
+        private async Task<long> ResolveDownloadCountAsync(
+            PackageSourceModel source,
+            string packageId,
+            long currentCount,
+            CancellationToken cancellationToken)
+        {
+            if (currentCount != 0 || !IsNuGetOrgSource(source)) return currentCount;
+            try
+            {
+                var searchResource = await GetSearchResourceAsync(source, cancellationToken).ConfigureAwait(false);
+                if (searchResource != null)
+                {
+                    var hits = await searchResource.SearchAsync(
+                        "packageid:" + packageId,
+                        new SearchFilter(includePrerelease: true),
+                        0, 1, _logger, cancellationToken).ConfigureAwait(false);
+                    var hit = hits?.FirstOrDefault();
+                    if (hit?.DownloadCount != null) return hit.DownloadCount.Value;
+                }
+            }
+            catch (OperationCanceledException) { throw; }
+            catch { /* search fallback is best-effort */ }
+            return currentCount;
         }
 
         // Projects the feed's per-version vulnerability advisories onto our model.
@@ -1194,25 +1192,8 @@ namespace NuGetManagerSlim.Services
 
                 // Same nuget.org-only guard as the latest-metadata path: skip the
                 // search-resource fallback on feeds that never expose download counts.
-                long downloadCount = meta.DownloadCount ?? 0;
-                if (downloadCount == 0 && IsNuGetOrgSource(source))
-                {
-                    try
-                    {
-                        var searchResource = await GetSearchResourceAsync(source, cancellationToken).ConfigureAwait(false);
-                        if (searchResource != null)
-                        {
-                            var hits = await searchResource.SearchAsync(
-                                "packageid:" + packageId,
-                                new SearchFilter(includePrerelease: true),
-                                0, 1, _logger, cancellationToken).ConfigureAwait(false);
-                            var hit = hits?.FirstOrDefault();
-                            if (hit?.DownloadCount != null) downloadCount = hit.DownloadCount.Value;
-                        }
-                    }
-                    catch (OperationCanceledException) { throw; }
-                    catch { /* search fallback is best-effort */ }
-                }
+                long downloadCount = await ResolveDownloadCountAsync(
+                    source, packageId, meta.DownloadCount ?? 0, cancellationToken).ConfigureAwait(false);
 
                 var (isDeprecated, deprecationReason) = await MapDeprecationAsync(meta).ConfigureAwait(false);
 

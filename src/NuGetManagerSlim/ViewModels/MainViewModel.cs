@@ -819,7 +819,26 @@ namespace NuGetManagerSlim.ViewModels
                     if (rowsNeedingFetch.Count > 0)
                         await EnrichRowsAsync(rowsNeedingFetch, cancellationToken).ConfigureAwait(true);
 
+                    cancellationToken.ThrowIfCancellationRequested();
                     rows = rows.Where(r => r.HasUpdate).ToList();
+                    _packages.ReplaceAll(rows.OrderBy(r => r.IsTransitive).ThenBy(r => r.PackageId));
+                    SeedMruFromInstalled(installed);
+
+                    // EnrichRowsAsync resolved both the latest-version metadata and
+                    // the installed version's vulnerability badge for the rows it
+                    // fetched, so those are display-ready from a single registration
+                    // fetch per package. Cache-warm survivors (skipped above) still
+                    // need their installed-version advisories surfaced, so run the
+                    // shared background pass for just those rows - excluding the ones
+                    // already enriched above so no package is fetched twice (#24).
+                    var enrichedIds = new HashSet<string>(
+                        rowsNeedingFetch.Select(r => r.PackageId), StringComparer.OrdinalIgnoreCase);
+                    var rowsNeedingBadge = Packages.Where(r => !enrichedIds.Contains(r.PackageId)).ToList();
+                    if (rowsNeedingBadge.Count > 0)
+                        EnrichInstalledInBackground(rowsNeedingBadge, ReplaceCts(ref _enrichCts));
+                    else
+                        CancelCts(ref _enrichCts);
+                    return;
                 }
 
                 _packages.ReplaceAll(rows.OrderBy(r => r.IsTransitive).ThenBy(r => r.PackageId));
@@ -831,11 +850,10 @@ namespace NuGetManagerSlim.ViewModels
 
                 SeedMruFromInstalled(installed);
 
-                // Background-enrich the displayed rows in every list view. The
-                // Updates view runs this too so the vulnerability badge shows there
-                // as well (issue #24); its latest-version data is already cached
-                // from the synchronous pass above, so the extra fetch is just a
-                // cache hit.
+                // Background-enrich the displayed rows for the plain Installed and
+                // Browse views. The Updates, Vulnerable, and Deprecated views return
+                // early above with their own targeted enrichment, so this tail only
+                // serves the views that list every installed/searched package.
                 {
                     // One enrichment scope covers both the direct rows enriched
                     // here and any transitive rows appended later by
@@ -880,22 +898,33 @@ namespace NuGetManagerSlim.ViewModels
         private CancellationTokenSource? _enrichCts;
         private CancellationTokenSource? _transitiveCts;
 
-        // Awaitable variant of metadata enrichment used by the Updates view,
-        // which has to know each installed package's latest version before it
-        // can decide whether to include the row.
+        // Awaitable metadata enrichment used by the Updates view, which has to
+        // know each installed package's latest version before it can decide
+        // whether to include the row. A single registration fetch per package
+        // (GetInstalledEnrichmentAsync) resolves both the latest-version metadata
+        // (for the HasUpdate decision and the update badge) and the installed
+        // version's vulnerability advisories, so an updatable row never needs a
+        // second background pass just to surface its vulnerability badge (#20/#24).
         private async Task EnrichRowsAsync(IReadOnlyList<PackageRowViewModel> rows, CancellationToken ct)
         {
             if (rows == null || rows.Count == 0) return;
-            await TaskScheduler.Default;
             var tasks = rows.Select(async row =>
             {
                 if (ct.IsCancellationRequested) return;
                 await s_enrichmentThrottle.WaitAsync(ct).ConfigureAwait(false);
                 try
                 {
-                    var meta = await _feedService.GetPackageMetadataAsync(row.PackageId, ct).ConfigureAwait(false);
-                    if (meta == null || ct.IsCancellationRequested) return;
-                    row.ApplyMetadata(meta);
+                    // Skip the nuget.org download-count search fallback when the row
+                    // already carries a count; the ApplyMetadata merge keeps the
+                    // existing count anyway, so the extra search would be pure waste.
+                    var needsDownloadCount = row.Model.DownloadCount <= 0;
+                    var enrichment = await _feedService.GetInstalledEnrichmentAsync(
+                        row.PackageId, row.InstalledVersion, needsDownloadCount, ct).ConfigureAwait(false);
+                    if (enrichment == null || ct.IsCancellationRequested) return;
+                    if (enrichment.Latest != null)
+                        row.ApplyMetadata(enrichment.Latest);
+                    if (enrichment.InstalledVulnerabilities.Count > 0)
+                        row.ApplyVulnerabilities(enrichment.InstalledVulnerabilities);
                 }
                 catch (OperationCanceledException) { }
                 catch (Exception ex) { await ex.LogAsync(); }
