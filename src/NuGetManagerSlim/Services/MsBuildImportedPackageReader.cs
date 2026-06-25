@@ -143,13 +143,11 @@ namespace NuGetManagerSlim.Services
 
             foreach (var packageRef in doc.Descendants().Where(e => e.Name.LocalName == "PackageReference"))
             {
-                var id = (string?)packageRef.Attribute("Include") ?? (string?)packageRef.Attribute("Update");
+                var id = PackageReferenceXml.ReadId(packageRef);
                 if (string.IsNullOrEmpty(id)) continue;
                 if (ContainsMsBuildExpression(id!)) continue;
 
-                var versionRaw = (string?)packageRef.Attribute("Version")
-                                 ?? (string?)packageRef.Attribute("VersionOverride")
-                                 ?? packageRef.Elements().FirstOrDefault(e => e.Name.LocalName == "Version")?.Value;
+                var versionRaw = PackageReferenceXml.ReadVersionRaw(packageRef);
 
                 NuGetVersion? version = null;
                 if (!string.IsNullOrWhiteSpace(versionRaw))

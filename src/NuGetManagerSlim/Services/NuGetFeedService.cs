@@ -197,7 +197,7 @@ namespace NuGetManagerSlim.Services
             lock (_searchCacheLock) _searchCache.Clear();
             lock (_metadataCacheLock) _metadataCache.Clear();
             lock (_versionsCacheLock) _versionsCache.Clear();
-            lock (_sourcesCacheLock) _enabledSourcesCache = null;
+            lock (_sourcesCacheLock) { _allSourcesCache = null; _enabledSourcesCache = null; }
             _repositoryCache.Clear();
             _searchResourceCache.Clear();
             _metadataResourceCache.Clear();
@@ -1315,20 +1315,7 @@ namespace NuGetManagerSlim.Services
         }
 
         public Task<IReadOnlyList<PackageSourceModel>> GetSourcesAsync(CancellationToken cancellationToken)
-        {
-            var settings = Settings.LoadDefaultSettings(root: null);
-            var provider = new PackageSourceProvider(settings);
-            var sources = provider.LoadPackageSources()
-                .Select(s => new PackageSourceModel
-                {
-                    Name = s.Name,
-                    Source = s.Source,
-                    IsEnabled = s.IsEnabled,
-                })
-                .ToList();
-
-            return Task.FromResult<IReadOnlyList<PackageSourceModel>>(sources);
-        }
+            => Task.FromResult(LoadAllSources());
 
         public Task<string?> GetReadmeAsync(string packageId, NuGetVersion version, CancellationToken cancellationToken)
         {
@@ -1419,37 +1406,59 @@ namespace NuGetManagerSlim.Services
             return final;
         }
 
-        private static IReadOnlyList<PackageSourceModel> GetEnabledSources()
+        // Single source of truth for reading the configured NuGet sources from
+        // disk. Both the full-source list (GetSourcesAsync, used by the source
+        // picker) and the enabled-only list (GetEnabledSources, used by every
+        // fetch fan-out) derive from this one cached read so NuGet.config isn't
+        // parsed twice for the same snapshot.
+        private static IReadOnlyList<PackageSourceModel> LoadAllSources()
         {
-            var cached = _enabledSourcesCache;
+            var cached = _allSourcesCache;
             if (cached != null) return cached;
 
             lock (_sourcesCacheLock)
             {
-                if (_enabledSourcesCache != null) return _enabledSourcesCache;
+                if (_allSourcesCache != null) return _allSourcesCache;
 
                 try
                 {
                     var settings = Settings.LoadDefaultSettings(root: null);
                     var provider = new PackageSourceProvider(settings);
-                    _enabledSourcesCache = provider.LoadPackageSources()
-                        .Where(s => s.IsEnabled)
-                        .Select(s => new PackageSourceModel { Name = s.Name, Source = s.Source, IsEnabled = true })
+                    _allSourcesCache = provider.LoadPackageSources()
+                        .Select(s => new PackageSourceModel { Name = s.Name, Source = s.Source, IsEnabled = s.IsEnabled })
                         .ToList();
                 }
                 catch
                 {
-                    _enabledSourcesCache = [new PackageSourceModel { Name = "nuget.org", Source = "https://api.nuget.org/v3/index.json", IsEnabled = true }];
+                    _allSourcesCache = [new PackageSourceModel { Name = "nuget.org", Source = "https://api.nuget.org/v3/index.json", IsEnabled = true }];
                 }
 
+                return _allSourcesCache;
+            }
+        }
+
+        private static IReadOnlyList<PackageSourceModel> GetEnabledSources()
+        {
+            var cached = _enabledSourcesCache;
+            if (cached != null) return cached;
+
+            // Derive from the shared full-source snapshot (loaded/cached once)
+            // rather than re-reading NuGet.config a second time.
+            var all = LoadAllSources();
+            lock (_sourcesCacheLock)
+            {
+                if (_enabledSourcesCache != null) return _enabledSourcesCache;
+                _enabledSourcesCache = all.Where(s => s.IsEnabled).ToList();
                 return _enabledSourcesCache;
             }
         }
 
-        // Cached enabled-sources snapshot. NuGet.config rarely changes mid-session,
-        // and this list was previously re-read from disk on every search, every
+        // Cached source snapshots. NuGet.config rarely changes mid-session, and
+        // these lists were previously re-read from disk on every search, every
         // metadata fetch, and every per-package enrichment fan-out (so 50+ disk
-        // reads per keystroke during a Browse search).
+        // reads per keystroke during a Browse search). Both are cleared together
+        // by InvalidateCache() so a user-initiated Refresh picks up edits.
+        private static IReadOnlyList<PackageSourceModel>? _allSourcesCache;
         private static IReadOnlyList<PackageSourceModel>? _enabledSourcesCache;
         private static readonly object _sourcesCacheLock = new();
 

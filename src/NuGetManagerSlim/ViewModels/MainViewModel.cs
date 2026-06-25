@@ -581,7 +581,7 @@ namespace NuGetManagerSlim.ViewModels
                             .Where(r => r.IsInstalled && r.LatestStableVersion == null)
                             .ToList();
                         if (needsEnrichCache.Count > 0)
-                            EnrichInstalledInBackground(needsEnrichCache, ReplaceCts(ref _enrichCts));
+                            _ = EnrichInstalledInBackground(needsEnrichCache, ReplaceCts(ref _enrichCts));
                         return;
                     }
 
@@ -611,7 +611,7 @@ namespace NuGetManagerSlim.ViewModels
                         .Where(r => r.IsInstalled && r.LatestStableVersion == null)
                         .ToList();
                     if (needsEnrich.Count > 0)
-                        EnrichInstalledInBackground(needsEnrich, ReplaceCts(ref _enrichCts));
+                        _ = EnrichInstalledInBackground(needsEnrich, ReplaceCts(ref _enrichCts));
                 }
                 else
                 {
@@ -736,7 +736,7 @@ namespace NuGetManagerSlim.ViewModels
                     // background metadata pass the Installed/Browse views use so the
                     // rows get the full set of details. Cached metadata makes this a
                     // cheap set of cache hits on repeat visits.
-                    EnrichInstalledInBackground(Packages.ToList(), ReplaceCts(ref _enrichCts));
+                    _ = EnrichInstalledInBackground(Packages.ToList(), ReplaceCts(ref _enrichCts));
                     return;
                 }
 
@@ -835,7 +835,7 @@ namespace NuGetManagerSlim.ViewModels
                         rowsNeedingFetch.Select(r => r.PackageId), StringComparer.OrdinalIgnoreCase);
                     var rowsNeedingBadge = Packages.Where(r => !enrichedIds.Contains(r.PackageId)).ToList();
                     if (rowsNeedingBadge.Count > 0)
-                        EnrichInstalledInBackground(rowsNeedingBadge, ReplaceCts(ref _enrichCts));
+                        _ = EnrichInstalledInBackground(rowsNeedingBadge, ReplaceCts(ref _enrichCts));
                     else
                         CancelCts(ref _enrichCts);
                     return;
@@ -866,7 +866,7 @@ namespace NuGetManagerSlim.ViewModels
                     // One consolidated pass resolves both the latest-version
                     // metadata and the installed version's vulnerability badges
                     // (issue #20) from a single registration fetch per package.
-                    EnrichInstalledInBackground(Packages.ToList(), enrichToken);
+                    _ = EnrichInstalledInBackground(Packages.ToList(), enrichToken);
 
                     // Transitive packages are read from project.assets.json which
                     // can be slow on first cold restore. Kick the load off in the
@@ -1017,10 +1017,11 @@ namespace NuGetManagerSlim.ViewModels
         // one fetch means each package costs one registration round trip instead of
         // two. Surfacing the installed-version advisories here keeps the badge
         // visible in every list view, not just the dedicated Vulnerable view
-        // (issue #20).
-        private void EnrichInstalledInBackground(IReadOnlyList<PackageRowViewModel> rows, CancellationToken ct)
+        // (issue #20). Returns the background Task so callers can observe or await
+        // completion (e.g. in tests); production callers fire-and-forget it.
+        private Task EnrichInstalledInBackground(IReadOnlyList<PackageRowViewModel> rows, CancellationToken ct)
         {
-            _ = Task.Run(async () =>
+            return Task.Run(async () =>
             {
                 var tasks = rows.Select(async row =>
                 {
@@ -1107,7 +1108,7 @@ namespace NuGetManagerSlim.ViewModels
                     {
                         OnPropertyChanged(nameof(HasPackages));
                         OnPropertyChanged(nameof(IsEmptyState));
-                        EnrichInstalledInBackground(newRows, enrichToken);
+                        _ = EnrichInstalledInBackground(newRows, enrichToken);
                     }
                 });
             }, ct);
