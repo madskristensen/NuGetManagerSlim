@@ -339,5 +339,133 @@ namespace NuGetManagerSlim.Tests.Services
             var mid = Assert.Single(transitives, p => p.PackageId == "Mid");
             Assert.Equal(new[] { "Root" }, mid.RequiredByPackageIds);
         }
+
+        [Fact]
+        public void ReadInstalledFromProject_SdkStyle_AttributesTargetFramework()
+        {
+            // Issue #30: every package carries the project's target framework so
+            // the update cap can later be resolved per package.
+            var path = Path.Combine(_tempDir, "Sample.csproj");
+            File.WriteAllText(path, """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup>
+                  <ItemGroup>
+                    <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="8.0.0" />
+                  </ItemGroup>
+                </Project>
+                """);
+
+            var pkg = Assert.Single(ProjectService.ReadInstalledFromProject(path).ToList());
+            Assert.Equal(new[] { "net8.0" }, pkg.ReferencingFrameworks);
+        }
+
+        [Fact]
+        public void ReadInstalledFromProject_MultiTarget_AttributesAllFrameworks()
+        {
+            var path = Path.Combine(_tempDir, "Sample.csproj");
+            File.WriteAllText(path, """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup><TargetFrameworks>net48;net8.0</TargetFrameworks></PropertyGroup>
+                  <ItemGroup>
+                    <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="8.0.0" />
+                  </ItemGroup>
+                </Project>
+                """);
+
+            var pkg = Assert.Single(ProjectService.ReadInstalledFromProject(path).ToList());
+            Assert.Equal(new[] { "net48", "net8.0" }, pkg.ReferencingFrameworks);
+        }
+
+        [Fact]
+        public void ReadInstalledFromProject_Net8OnlyCappedFamily_ResolvesCapTo8()
+        {
+            // The core of issue #30: a package referenced only by a net8.0 project
+            // is capped at major 8 even though, before the fix, a net48 project
+            // elsewhere in the solution disabled the cap for everything.
+            var path = Path.Combine(_tempDir, "Sample.csproj");
+            File.WriteAllText(path, """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup>
+                  <ItemGroup>
+                    <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="8.0.0" />
+                  </ItemGroup>
+                </Project>
+                """);
+
+            var pkg = Assert.Single(ProjectService.ReadInstalledFromProject(path).ToList());
+            Assert.Equal(8, TargetFrameworkCap.ResolveCap(pkg.ReferencingFrameworks));
+        }
+
+        [Fact]
+        public void ReadInstalledFromProject_MixedNet48Net8_ResolvesToNoCap()
+        {
+            // A package referenced by a net48 leg must stay uncapped so its net48
+            // compatibility isn't broken - consistent with the existing rule.
+            var path = Path.Combine(_tempDir, "Sample.csproj");
+            File.WriteAllText(path, """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup><TargetFrameworks>net48;net8.0</TargetFrameworks></PropertyGroup>
+                  <ItemGroup>
+                    <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="8.0.0" />
+                  </ItemGroup>
+                </Project>
+                """);
+
+            var pkg = Assert.Single(ProjectService.ReadInstalledFromProject(path).ToList());
+            Assert.Null(TargetFrameworkCap.ResolveCap(pkg.ReferencingFrameworks));
+        }
+
+        [Fact]
+        public void ReadInstalledFromProject_LegacyFrameworkVersion_ResolvesToNoCap()
+        {
+            var path = Path.Combine(_tempDir, "Legacy.csproj");
+            File.WriteAllText(path, """
+                <Project ToolsVersion="4.0">
+                  <PropertyGroup><TargetFrameworkVersion>v4.8</TargetFrameworkVersion></PropertyGroup>
+                  <ItemGroup />
+                </Project>
+                """);
+            File.WriteAllText(Path.Combine(_tempDir, "packages.config"), """
+                <?xml version="1.0" encoding="utf-8"?>
+                <packages>
+                  <package id="Microsoft.Extensions.Caching.Memory" version="3.1.0" targetFramework="net48" />
+                </packages>
+                """);
+
+            var pkg = Assert.Single(ProjectService.ReadInstalledFromProject(path).ToList());
+            Assert.Equal(new[] { "v4.8" }, pkg.ReferencingFrameworks);
+            Assert.Null(TargetFrameworkCap.ResolveCap(pkg.ReferencingFrameworks));
+        }
+
+        [Fact]
+        public void ReadInstalledFromProjectWithImports_AttributesFrameworksToImportedPackages()
+        {
+            var projDir = Path.Combine(_tempDir, "App");
+            Directory.CreateDirectory(projDir);
+            var proj = Path.Combine(projDir, "App.csproj");
+
+            File.WriteAllText(proj, """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup>
+                  <ItemGroup>
+                    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+                  </ItemGroup>
+                </Project>
+                """);
+            File.WriteAllText(Path.Combine(_tempDir, "Directory.Build.props"), """
+                <Project>
+                  <ItemGroup>
+                    <PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.0" />
+                  </ItemGroup>
+                </Project>
+                """);
+
+            var packages = ProjectService.ReadInstalledFromProjectWithImports(proj, CancellationToken.None);
+
+            var direct = Assert.Single(packages, p => p.PackageId == "Newtonsoft.Json");
+            Assert.Equal(new[] { "net8.0" }, direct.ReferencingFrameworks);
+            var imported = Assert.Single(packages, p => p.PackageId == "Microsoft.Extensions.Logging");
+            Assert.Equal(new[] { "net8.0" }, imported.ReferencingFrameworks);
+        }
     }
 }

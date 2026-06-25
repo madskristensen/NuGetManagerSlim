@@ -453,50 +453,18 @@ namespace NuGetManagerSlim.ViewModels
         // prereleases whenever the user has opted into them. Rows are rebuilt on
         // every reload (including when the prerelease toggle changes), so setting
         // the flag at construction is sufficient.
+        //
+        // The target-framework update cap is resolved per package (issue #30)
+        // from the framework(s) that actually reference it, so a net8.0-only
+        // package is capped even when other projects in the scope target net48.
+        // Search hits for packages the user hasn't installed carry no referencing
+        // frameworks and so resolve to "no cap", which is correct.
         private PackageRowViewModel CreateRow(PackageModel model) =>
             new(model)
             {
                 IncludePrerelease = FilterPrerelease,
-                TargetFrameworkMajorCap = _targetFrameworkMajorCap,
+                TargetFrameworkMajorCap = TargetFrameworkCap.ResolveCap(model.ReferencingFrameworks),
             };
-
-        // Cached target-framework update cap for the current scope (issue #27).
-        // Resolved from the project file(s) and refreshed when the scope changes
-        // or on a user-initiated Refresh, so capping reflects TFM edits without
-        // re-reading the csproj on every keystroke.
-        private int? _targetFrameworkMajorCap;
-        private string? _capResolvedForKey;
-
-        private async Task RefreshTargetFrameworkCapAsync(bool force, CancellationToken cancellationToken)
-        {
-            var key = CurrentProject == null
-                ? null
-                : CurrentProject.IsSolutionScope
-                    ? "solution:" + string.Join(";", CurrentProject.ProjectFullPaths)
-                    : "project:" + CurrentProject.ProjectFullPath;
-
-            if (!force && key == _capResolvedForKey) return;
-
-            int? cap = null;
-            if (CurrentProject != null)
-            {
-                try
-                {
-                    cap = await _projectService
-                        .ResolveTargetFrameworkMajorCapAsync(CurrentProject, cancellationToken)
-                        .ConfigureAwait(true);
-                }
-                catch (OperationCanceledException) { throw; }
-                catch (Exception ex)
-                {
-                    await ex.LogAsync();
-                    cap = null;
-                }
-            }
-
-            _targetFrameworkMajorCap = cap;
-            _capResolvedForKey = key;
-        }
 
 
         partial void OnIsRemoteLoadingChanged(bool value)
@@ -590,8 +558,6 @@ namespace NuGetManagerSlim.ViewModels
 
             try
             {
-                await RefreshTargetFrameworkCapAsync(force: false, ct).ConfigureAwait(true);
-
                 if (!FilterInstalled && !FilterUpdates)
                 {
                     // Cache hit: skip the skeleton/loading flash and render the
@@ -697,8 +663,6 @@ namespace NuGetManagerSlim.ViewModels
         private async Task ApplyFiltersAsync(CancellationToken cancellationToken = default)
         {
             if (CurrentProject == null) return;
-
-            await RefreshTargetFrameworkCapAsync(force: false, cancellationToken).ConfigureAwait(true);
 
             // Abort any transitive load still running from a previous filter
             // state. The Installed path below starts a fresh one; the Updates and
@@ -1264,6 +1228,8 @@ namespace NuGetManagerSlim.ViewModels
                         InstalledVersion = inst.InstalledVersion,
                         LatestStableVersion = m.LatestStableVersion,
                         LatestPrereleaseVersion = m.LatestPrereleaseVersion,
+                        MaxStableByMajor = m.MaxStableByMajor,
+                        MaxPrereleaseByMajor = m.MaxPrereleaseByMajor,
                         Description = m.Description,
                         Authors = m.Authors,
                         LicenseExpression = m.LicenseExpression,
@@ -1273,6 +1239,10 @@ namespace NuGetManagerSlim.ViewModels
                         IsTransitive = false,
                         RequiredByPackageId = m.RequiredByPackageId,
                         RequiredByPackageIds = m.RequiredByPackageIds,
+                        // Carry the installed package's referencing frameworks so the
+                        // per-package update cap still applies to rows surfaced through
+                        // remote search (issue #30).
+                        ReferencingFrameworks = inst.ReferencingFrameworks,
                         ReadmeUrl = m.ReadmeUrl,
                         ProjectUrl = m.ProjectUrl,
                         IconUrl = m.IconUrl,
@@ -1347,7 +1317,6 @@ namespace NuGetManagerSlim.ViewModels
             // the live feed, then reload.
             _feedService.InvalidateCache();
             OperationLog.Clear();
-            _capResolvedForKey = null;
             await ReloadPackagesAsync();
         }
 

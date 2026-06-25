@@ -67,7 +67,7 @@ Install, update, and uninstall directly from the row. No dialog, no confirmation
 
 ### Framework-aware updates
 
-For runtime-coupled package families (`System.*`, `Microsoft.Extensions.*`, `Microsoft.AspNetCore.*`), the suggested update stays within your project's target-framework major. A project on `net8.0` is offered the newest `8.x` instead of jumping to `9.0.0`, so the inline update icon and bulk update never push a runtime mismatch. When a newer major is held back, an info icon next to the version explains why - and you can still pick any version from the detail pane's version dropdown to update past the cap on purpose.
+For runtime-coupled package families (`System.*`, `Microsoft.Extensions.*`, `Microsoft.AspNetCore.*`, `Microsoft.EntityFrameworkCore*`, `Microsoft.Data.Sqlite*`, `Microsoft.Bcl.*`, `Microsoft.JSInterop*`, `Microsoft.Windows.Compatibility`), the suggested update stays within the target-framework major
 
 ### Spot deprecated and vulnerable packages
 
@@ -128,7 +128,7 @@ A: Some packages publish an `iconUrl` that resolves to nothing or to a non-image
 A: Yes. The installed list reflects the union of packages across target frameworks, and version operations write to the project file the same way the built-in manager does.
 
 **Q: Why is it offering an older major than the latest version?**  
-A: For runtime-coupled families (`System.*`, `Microsoft.Extensions.*`, `Microsoft.AspNetCore.*`), the suggested update is capped to your project's target-framework major - a `net8.0` project gets the latest `8.x` rather than `9.0.0`, which avoids pulling in a runtime newer than the framework you target. An info icon next to the version flags when this is happening. To update past the cap, open the package and choose the version you want from the detail pane's version dropdown.
+A: For runtime-coupled families (`System.*`, `Microsoft.Extensions.*`, `Microsoft.AspNetCore.*`, `Microsoft.EntityFrameworkCore*`, `Microsoft.Data.Sqlite*`, `Microsoft.Bcl.*`, `Microsoft.JSInterop*`, `Microsoft.Windows.Compatibility`), the suggested update is capped to the target-framework major
 
 **Q: Can I use it without a solution open?**  
 A: The tool window opens, but most operations require an active project or solution to install or update against.

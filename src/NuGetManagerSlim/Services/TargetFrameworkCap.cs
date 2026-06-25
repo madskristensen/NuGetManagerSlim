@@ -28,6 +28,32 @@ namespace NuGetManagerSlim.Services
             "System.",
             "Microsoft.Extensions.",
             "Microsoft.AspNetCore.",
+            // EF Core ships a new major in lockstep with each .NET release
+            // (EF Core 8 -> net8.0, EF Core 9 -> net9.0), so it caps like the
+            // ASP.NET Core family. No trailing dot so it covers both the base
+            // Microsoft.EntityFrameworkCore package and the providers such as
+            // Microsoft.EntityFrameworkCore.SqlServer (issue #30).
+            "Microsoft.EntityFrameworkCore",
+            // The Windows.Compatibility meta-package is versioned in lockstep
+            // with the runtime too (8.0.x, 9.0.x) and is the common bridge when
+            // retargeting from .NET Framework, so cap it to the project's major
+            // (issue #30). Prefix form also covers the exact id.
+            "Microsoft.Windows.Compatibility",
+            // Microsoft.Data.Sqlite ships from the EF Core repo on the same
+            // runtime-aligned cadence (8.0.x, 9.0.x). The prefix covers
+            // Microsoft.Data.Sqlite and .Core without matching the
+            // independently-versioned Microsoft.Data.SqlClient (issue #30).
+            "Microsoft.Data.Sqlite",
+            // The BCL backport packages (Microsoft.Bcl.AsyncInterfaces,
+            // Microsoft.Bcl.TimeProvider, etc.) come from dotnet/runtime and
+            // version in lockstep (8.0.0, 9.0.0). On .NET Framework targets the
+            // cap doesn't apply (no .NET major), so backport consumers are
+            // unaffected; on net8.0+ the major is held to the runtime (issue #30).
+            "Microsoft.Bcl.",
+            // Blazor's JS interop ships from dotnet/aspnetcore in lockstep with
+            // the runtime but its id isn't under the Microsoft.AspNetCore.
+            // prefix, so cap it explicitly (issue #30).
+            "Microsoft.JSInterop",
         };
 
         /// <summary>

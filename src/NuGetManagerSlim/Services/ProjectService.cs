@@ -43,6 +43,16 @@ namespace NuGetManagerSlim.Services
                 {
                     cancellationToken.ThrowIfCancellationRequested();
 
+                    // The project's target framework(s) attribute every package it
+                    // references, so the per-package update cap can later be resolved
+                    // from only the frameworks that actually use the package (issue
+                    // #30). Read once off the dispatcher and stamped onto packages
+                    // from the NuGet and imported paths (the raw-XML path stamps its
+                    // own results); MergeInstalled unions them across projects.
+                    var projectFrameworks = await Task
+                        .Run(() => ReadTargetFrameworks(projectPath), cancellationToken)
+                        .ConfigureAwait(false);
+
                     // Prefer NuGet's view of the project (IVsPackageInstallerServices) so
                     // we pick up SDK-injected refs (MSTest.Sdk, etc.), Central Package
                     // Management versions, and conditional PackageReferences that the raw
@@ -54,7 +64,7 @@ namespace NuGetManagerSlim.Services
                         foreach (var pkg in fromNuGet)
                         {
                             cancellationToken.ThrowIfCancellationRequested();
-                            MergeInstalled(byId, pkg);
+                            MergeInstalled(byId, pkg.WithReferencingFrameworks(projectFrameworks));
                         }
 
                         // The NuGet API gives us resolved versions but not version range
@@ -91,7 +101,7 @@ namespace NuGetManagerSlim.Services
                     foreach (var pkg in imported)
                     {
                         cancellationToken.ThrowIfCancellationRequested();
-                        MergeInstalled(byId, pkg);
+                        MergeInstalled(byId, pkg.WithReferencingFrameworks(projectFrameworks));
                     }
                 }
 
@@ -184,10 +194,15 @@ namespace NuGetManagerSlim.Services
                 cancellationToken.ThrowIfCancellationRequested();
                 MergeInstalled(byId, pkg);
             }
+
+            // Imported packages belong to the project too, so attribute the
+            // project's framework(s) to them for the per-package update cap
+            // (issue #30), mirroring GetInstalledPackagesAsync.
+            var projectFrameworks = ReadTargetFrameworks(projectFullPath);
             foreach (var pkg in MsBuildImportedPackageReader.ReadImportedPackages(projectFullPath, cancellationToken))
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                MergeInstalled(byId, pkg);
+                MergeInstalled(byId, pkg.WithReferencingFrameworks(projectFrameworks));
             }
             return byId.Values
                 .OrderBy(p => p.PackageId, StringComparer.OrdinalIgnoreCase)
@@ -208,6 +223,13 @@ namespace NuGetManagerSlim.Services
             XDocument? doc = null;
             try { doc = XDocument.Load(projectFullPath); }
             catch { doc = null; }
+
+            // The project's own target framework(s) attribute every package it
+            // declares so the per-package update cap can be resolved later from
+            // only the frameworks that actually reference the package (issue #30).
+            var frameworks = doc?.Root != null
+                ? ExtractTargetFrameworks(doc)
+                : (IReadOnlyList<string>)Array.Empty<string>();
 
             if (doc?.Root != null)
             {
@@ -234,6 +256,7 @@ namespace NuGetManagerSlim.Services
                         InstalledVersion = version,
                         AllowedVersionRange = allowedRange,
                         SourceName = projectName,
+                        ReferencingFrameworks = frameworks,
                     };
                 }
             }
@@ -268,6 +291,7 @@ namespace NuGetManagerSlim.Services
                             InstalledVersion = version,
                             AllowedVersionRange = allowedRange,
                             SourceName = projectName,
+                            ReferencingFrameworks = frameworks,
                         };
                     }
                 }
@@ -379,68 +403,56 @@ namespace NuGetManagerSlim.Services
             return result;
         }
 
-        public async Task<int?> ResolveTargetFrameworkMajorCapAsync(
-            ProjectScopeModel scope,
-            CancellationToken cancellationToken)
-        {
-            if (scope == null) return null;
-
-            var projectPaths = ResolveScopePaths(scope);
-            if (projectPaths.Count == 0) return null;
-
-            var frameworks = new List<string>();
-            foreach (var projectPath in projectPaths)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                frameworks.AddRange(await ReadTargetFrameworksAsync(projectPath).ConfigureAwait(false));
-            }
-
-            return TargetFrameworkCap.ResolveCap(frameworks);
-        }
-
         // Reads the declared target framework moniker(s) from a project file:
         // SDK-style <TargetFramework> / <TargetFrameworks> (short monikers like
         // net8.0) and the legacy non-SDK <TargetFrameworkVersion> (e.g. v4.8).
         // Best-effort: returns an empty list when the file is missing or unreadable.
-        private static Task<IReadOnlyList<string>> ReadTargetFrameworksAsync(string projectFullPath)
+        private static IReadOnlyList<string> ReadTargetFrameworks(string projectFullPath)
         {
-            return Task.Run<IReadOnlyList<string>>(() =>
+            if (string.IsNullOrEmpty(projectFullPath) || !File.Exists(projectFullPath))
+                return Array.Empty<string>();
+
+            XDocument? doc;
+            try { doc = XDocument.Load(projectFullPath); }
+            catch { return Array.Empty<string>(); }
+
+            if (doc?.Root == null) return Array.Empty<string>();
+
+            return ExtractTargetFrameworks(doc);
+        }
+
+        // Pulls the target framework moniker(s) out of an already-loaded project
+        // document, so callers that parse the project file for other reasons
+        // (e.g. PackageReference discovery) don't have to load it a second time.
+        private static IReadOnlyList<string> ExtractTargetFrameworks(XDocument doc)
+        {
+            var result = new List<string>();
+            if (doc?.Root == null) return result;
+
+            foreach (var element in doc.Descendants())
             {
-                var result = new List<string>();
-                if (string.IsNullOrEmpty(projectFullPath) || !File.Exists(projectFullPath))
-                    return result;
-
-                XDocument? doc;
-                try { doc = XDocument.Load(projectFullPath); }
-                catch { return result; }
-
-                if (doc?.Root == null) return result;
-
-                foreach (var element in doc.Descendants())
+                var name = element.Name.LocalName;
+                if (string.Equals(name, "TargetFramework", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(name, "TargetFrameworkVersion", StringComparison.OrdinalIgnoreCase))
                 {
-                    var name = element.Name.LocalName;
-                    if (string.Equals(name, "TargetFramework", StringComparison.OrdinalIgnoreCase)
-                        || string.Equals(name, "TargetFrameworkVersion", StringComparison.OrdinalIgnoreCase))
+                    var value = element.Value?.Trim();
+                    if (!string.IsNullOrEmpty(value)) result.Add(value);
+                }
+                else if (string.Equals(name, "TargetFrameworks", StringComparison.OrdinalIgnoreCase))
+                {
+                    var value = element.Value?.Trim();
+                    if (!string.IsNullOrEmpty(value))
                     {
-                        var value = element.Value?.Trim();
-                        if (!string.IsNullOrEmpty(value)) result.Add(value);
-                    }
-                    else if (string.Equals(name, "TargetFrameworks", StringComparison.OrdinalIgnoreCase))
-                    {
-                        var value = element.Value?.Trim();
-                        if (!string.IsNullOrEmpty(value))
+                        foreach (var tfm in value.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries))
                         {
-                            foreach (var tfm in value.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries))
-                            {
-                                var trimmed = tfm.Trim();
-                                if (trimmed.Length > 0) result.Add(trimmed);
-                            }
+                            var trimmed = tfm.Trim();
+                            if (trimmed.Length > 0) result.Add(trimmed);
                         }
                     }
                 }
+            }
 
-                return result;
-            });
+            return result;
         }
 
         // Dedupe by package id within a single project (e.g. the same id
@@ -492,6 +504,21 @@ namespace NuGetManagerSlim.Services
                 if (union.Count != byId[pkg.PackageId].RequiredByPackageIds.Count)
                 {
                     byId[pkg.PackageId] = byId[pkg.PackageId].WithRequiredBy(new List<string>(union));
+                }
+            }
+
+            // The same package can be referenced from several projects targeting
+            // different frameworks, so union the referencing frameworks across
+            // projects (issue #30). The per-package cap is then resolved from the
+            // full set, matching the existing "any non-.NET target => no cap" rule.
+            if (existing.ReferencingFrameworks.Count > 0 || pkg.ReferencingFrameworks.Count > 0)
+            {
+                var frameworkUnion = new SortedSet<string>(existing.ReferencingFrameworks, StringComparer.OrdinalIgnoreCase);
+                frameworkUnion.UnionWith(pkg.ReferencingFrameworks);
+                var current = byId[pkg.PackageId];
+                if (frameworkUnion.Count != current.ReferencingFrameworks.Count)
+                {
+                    byId[pkg.PackageId] = current.WithReferencingFrameworks(new List<string>(frameworkUnion));
                 }
             }
         }

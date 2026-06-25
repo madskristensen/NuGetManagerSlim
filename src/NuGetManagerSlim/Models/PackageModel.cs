@@ -32,6 +32,17 @@ namespace NuGetManagerSlim.Models
         public bool IsTransitive { get; init; }
         public string? RequiredByPackageId { get; init; }
 
+        // Target-framework moniker(s) of the project(s) that reference this
+        // package, e.g. ["net8.0"] or ["net48", "net8.0"]. Populated during
+        // installed-package discovery and unioned across projects when the same
+        // id is referenced from several projects. Drives the per-package
+        // target-framework update cap (issue #30): the cap is resolved from only
+        // the frameworks that actually reference the package, so a net8.0-only
+        // package is still capped even when unrelated projects in the same
+        // solution target net48. Empty when the framework can't be determined,
+        // which resolves to "no cap".
+        public IReadOnlyList<string> ReferencingFrameworks { get; init; } = [];
+
         // Every direct (top-level) package that pulls in this transitive
         // dependency, mirroring the "required by" tooltip in the built-in NuGet
         // Package Manager (issue #19). RequiredByPackageId remains the first of
@@ -80,6 +91,7 @@ namespace NuGetManagerSlim.Models
             IsTransitive = IsTransitive,
             RequiredByPackageId = RequiredByPackageId,
             RequiredByPackageIds = RequiredByPackageIds,
+            ReferencingFrameworks = ReferencingFrameworks,
             ReadmeUrl = ReadmeUrl,
             ProjectUrl = ProjectUrl,
             IconUrl = IconUrl,
@@ -112,6 +124,41 @@ namespace NuGetManagerSlim.Models
             IsTransitive = IsTransitive,
             RequiredByPackageId = requiredByPackageIds.Count > 0 ? requiredByPackageIds[0] : RequiredByPackageId,
             RequiredByPackageIds = requiredByPackageIds,
+            ReferencingFrameworks = ReferencingFrameworks,
+            ReadmeUrl = ReadmeUrl,
+            ProjectUrl = ProjectUrl,
+            IconUrl = IconUrl,
+            Published = Published,
+            PerFrameworkVersions = PerFrameworkVersions,
+            Dependencies = Dependencies,
+            Vulnerabilities = Vulnerabilities,
+            IsDeprecated = IsDeprecated,
+            DeprecationReason = DeprecationReason,
+            AllowedVersionRange = AllowedVersionRange,
+        };
+
+        // Returns a copy carrying the given set of referencing target-framework
+        // monikers. Used to attribute the project's framework(s) to each
+        // discovered package and to union frameworks when the same id is merged
+        // across projects (issue #30).
+        internal PackageModel WithReferencingFrameworks(IReadOnlyList<string> referencingFrameworks) => new PackageModel
+        {
+            PackageId = PackageId,
+            InstalledVersion = InstalledVersion,
+            LatestStableVersion = LatestStableVersion,
+            LatestPrereleaseVersion = LatestPrereleaseVersion,
+            MaxStableByMajor = MaxStableByMajor,
+            MaxPrereleaseByMajor = MaxPrereleaseByMajor,
+            Description = Description,
+            Authors = Authors,
+            LicenseExpression = LicenseExpression,
+            LicenseUrl = LicenseUrl,
+            DownloadCount = DownloadCount,
+            SourceName = SourceName,
+            IsTransitive = IsTransitive,
+            RequiredByPackageId = RequiredByPackageId,
+            RequiredByPackageIds = RequiredByPackageIds,
+            ReferencingFrameworks = referencingFrameworks,
             ReadmeUrl = ReadmeUrl,
             ProjectUrl = ProjectUrl,
             IconUrl = IconUrl,
