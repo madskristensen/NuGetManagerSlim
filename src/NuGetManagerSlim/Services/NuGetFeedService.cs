@@ -927,9 +927,10 @@ namespace NuGetManagerSlim.Services
                 // (issue #26). Without the fallback a package flagged in the
                 // Vulnerable view showed no badge in the plain Installed list.
                 IReadOnlyList<PackageVulnerabilityInfo> installedVulnerabilities = [];
+                IPackageSearchMetadata? installedMeta = null;
                 if (installedVersion != null)
                 {
-                    var installedMeta = allMetadata.FirstOrDefault(
+                    installedMeta = allMetadata.FirstOrDefault(
                         m => m?.Identity?.Version != null && m.Identity.Version.Equals(installedVersion))
                         ?? allMetadata.OrderByDescending(m => m.Identity.Version).FirstOrDefault();
                     if (installedMeta != null)
