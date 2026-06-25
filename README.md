@@ -67,7 +67,7 @@ Install, update, and uninstall directly from the row. No dialog, no confirmation
 
 ### Framework-aware updates
 
-For runtime-coupled package families (`System.*`, `Microsoft.Extensions.*`, `Microsoft.AspNetCore.*`, `Microsoft.EntityFrameworkCore*`, `Microsoft.Data.Sqlite*`, `Microsoft.Bcl.*`, `Microsoft.JSInterop*`, `Microsoft.Windows.Compatibility`), the suggested update stays within the target-framework major
+For runtime-coupled package families (`System.*`, `Microsoft.Extensions.*`, `Microsoft.AspNetCore.*`, `Microsoft.EntityFrameworkCore*`, `Microsoft.Data.Sqlite*`, `Microsoft.Bcl.*`, `Microsoft.JSInterop*`, `Microsoft.Windows.Compatibility`), the suggested update stays within the target-framework major of the project(s) that reference the package. A package used only by a `net8.0` project is offered the newest `8.x` instead of jumping to `9.0.0`, so the inline update icon and bulk update never push a runtime mismatch - even in a solution that also has `net48` projects. A package referenced by a `net48` (or `.NET Standard`) project stays uncapped, since that target needs to keep working. A few packages that share the `System.` prefix but version independently of the runtime (such as `System.Reactive`, `System.IO.Abstractions`, and `System.CommandLine`) are excluded so their real updates are never held back. When a newer major is held back, an info icon next to the version explains why - and you can still pick any version from the detail pane's version dropdown to update past the cap on purpose.
 
 ### Spot deprecated and vulnerable packages
 
@@ -128,7 +128,7 @@ A: Some packages publish an `iconUrl` that resolves to nothing or to a non-image
 A: Yes. The installed list reflects the union of packages across target frameworks, and version operations write to the project file the same way the built-in manager does.
 
 **Q: Why is it offering an older major than the latest version?**  
-A: For runtime-coupled families (`System.*`, `Microsoft.Extensions.*`, `Microsoft.AspNetCore.*`, `Microsoft.EntityFrameworkCore*`, `Microsoft.Data.Sqlite*`, `Microsoft.Bcl.*`, `Microsoft.JSInterop*`, `Microsoft.Windows.Compatibility`), the suggested update is capped to the target-framework major
+A: For runtime-coupled families (`System.*`, `Microsoft.Extensions.*`, `Microsoft.AspNetCore.*`, `Microsoft.EntityFrameworkCore*`, `Microsoft.Data.Sqlite*`, `Microsoft.Bcl.*`, `Microsoft.JSInterop*`, `Microsoft.Windows.Compatibility`), the suggested update is capped to the target-framework major of the project(s) that reference the package - a package used only by a `net8.0` project gets the latest `8.x` rather than `9.0.0`, which avoids pulling in a runtime newer than the framework you target. The cap is resolved per package, so in a mixed solution a `net8.0`-only package is still capped while a package referenced by a `net48` project is left alone. A few packages that merely share the `System.` prefix but version independently (such as `System.Reactive` and `System.IO.Abstractions`) are excluded. An info icon next to the version flags when this is happening. To update past the cap, open the package and choose the version you want from the detail pane's version dropdown.
 
 **Q: Can I use it without a solution open?**  
 A: The tool window opens, but most operations require an active project or solution to install or update against.

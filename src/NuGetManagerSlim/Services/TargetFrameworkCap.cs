@@ -56,6 +56,23 @@ namespace NuGetManagerSlim.Services
             "Microsoft.JSInterop",
         };
 
+        // Package id prefixes that match a capped family prefix above (almost
+        // always "System.") but are versioned independently of the .NET runtime,
+        // so they must NOT be capped. Without this carve-out a package like
+        // System.IO.Abstractions (major 21) would be wrongly held back to the
+        // project's .NET major on net8.0+, hiding its real updates (issue #30).
+        // Checked before the family prefixes; matched case-insensitively as a
+        // prefix so it covers the whole sub-family (e.g. System.Reactive.*).
+        private static readonly string[] ExcludedFamilyPrefixes =
+        {
+            "System.Reactive",        // Rx.NET (6.x)
+            "System.Interactive",     // Ix.NET (6.x)
+            "System.Linq.Async",      // ships with Ix.NET (6.x)
+            "System.Linq.Dynamic",    // System.Linq.Dynamic.Core (1.x)
+            "System.IO.Abstractions", // TestableIO (21.x)
+            "System.CommandLine",     // independent cadence (2.x)
+        };
+
         /// <summary>
         /// True when the package id belongs to a runtime-coupled family that
         /// should respect the target-framework version cap.
@@ -63,6 +80,15 @@ namespace NuGetManagerSlim.Services
         public static bool IsCappedFamily(string? packageId)
         {
             if (string.IsNullOrEmpty(packageId)) return false;
+
+            // A handful of packages share a capped prefix (e.g. System.) but are
+            // versioned independently of the runtime; never cap those.
+            foreach (var excluded in ExcludedFamilyPrefixes)
+            {
+                if (packageId.StartsWith(excluded, StringComparison.OrdinalIgnoreCase))
+                    return false;
+            }
+
             foreach (var prefix in CappedFamilyPrefixes)
             {
                 if (packageId.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))

@@ -77,6 +77,19 @@ namespace NuGetManagerSlim.Tests.Services
         [InlineData("Newtonsoft.Json", false)]
         [InlineData("Serilog", false)]
         [InlineData("Microsoft.Data.SqlClient", false)]
+        // Packages that start with a capped prefix (System.) but version
+        // independently of the runtime must not be capped (issue #30).
+        [InlineData("System.Reactive", false)]
+        [InlineData("System.Reactive.Linq", false)]
+        [InlineData("System.Interactive", false)]
+        [InlineData("System.Linq.Async", false)]
+        [InlineData("System.Linq.Dynamic.Core", false)]
+        [InlineData("System.IO.Abstractions", false)]
+        [InlineData("System.IO.Abstractions.TestingHelpers", false)]
+        [InlineData("System.CommandLine", false)]
+        // Runtime-shipped System.* packages stay capped.
+        [InlineData("System.IO.Pipelines", true)]
+        [InlineData("System.Configuration.ConfigurationManager", true)]
         [InlineData("", false)]
         [InlineData(null, false)]
         public void IsCappedFamily_MatchesRuntimeCoupledPrefixes(string? id, bool expected)
