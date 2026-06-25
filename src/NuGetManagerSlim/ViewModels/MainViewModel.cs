@@ -30,7 +30,6 @@ namespace NuGetManagerSlim.ViewModels
         private readonly INuGetFeedService _feedService;
         private readonly IRestoreMonitorService _restoreMonitor;
         private readonly IMruPackageService? _mruService;
-        private readonly IViewModePreferenceService? _viewModePreferences;
 
         // Shared across all enrichment fan-outs to avoid the previous pattern of
         // allocating a fresh SemaphoreSlim per call (which let rapid filter
@@ -118,22 +117,13 @@ namespace NuGetManagerSlim.ViewModels
             }
             set
             {
-                // No-op when the mode isn't actually changing. This keeps a
-                // redundant set (e.g. the toolbar re-executing the command that
-                // syncs the menu-controller anchor icon) from kicking off an
-                // extra reload or re-raising PropertyChanged, which would
-                // otherwise loop with the anchor-sync handler.
+                // No-op when the mode isn't actually changing, so re-selecting
+                // the already-active item doesn't kick off an extra reload or
+                // re-raise PropertyChanged.
                 if (value == ViewMode) return;
 
                 SetViewModeFlags(value);
                 OnPropertyChanged();
-
-                // Persist the user's choice so the next session starts under the
-                // same mode. Visual Studio independently remembers the menu
-                // controller's anchor icon across restarts; restoring the mode
-                // keeps the icon, the dropdown check mark, and the list in sync
-                // (issue #23).
-                _ = _viewModePreferences?.SaveAsync(value, CancellationToken.None);
 
                 _ = ReloadPackagesAsync();
             }
@@ -174,14 +164,12 @@ namespace NuGetManagerSlim.ViewModels
             IProjectService projectService,
             INuGetFeedService feedService,
             IRestoreMonitorService restoreMonitor,
-            IMruPackageService? mruService,
-            IViewModePreferenceService? viewModePreferences = null)
+            IMruPackageService? mruService)
         {
             _projectService = projectService;
             _feedService = feedService;
             _restoreMonitor = restoreMonitor;
             _mruService = mruService;
-            _viewModePreferences = viewModePreferences;
 
             _debounceTimer = new System.Timers.Timer(300) { AutoReset = false };
             _debounceTimer.Elapsed += OnDebounceElapsed;
@@ -269,22 +257,6 @@ namespace NuGetManagerSlim.ViewModels
             IsLoading = true;
             try
             {
-                // Restore the last selected view mode before any packages load so
-                // the toolbar icon (which Visual Studio persists separately), the
-                // dropdown check mark, and the package list all agree on startup
-                // (issue #23). Done silently here because the project scope isn't
-                // set yet - the first ReloadPackagesAsync runs once a scope is
-                // selected and honors the restored mode.
-                if (_viewModePreferences != null)
-                {
-                    var saved = await _viewModePreferences.GetAsync(cancellationToken);
-                    if (saved.HasValue && saved.Value != ViewMode)
-                    {
-                        SetViewModeFlags(saved.Value);
-                        OnPropertyChanged(nameof(ViewMode));
-                    }
-                }
-
                 var sources = await _feedService.GetSourcesAsync(cancellationToken);
                 PackageSources.Clear();
                 foreach (var s in sources)

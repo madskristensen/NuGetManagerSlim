@@ -33,9 +33,8 @@ namespace NuGetManagerSlim.ToolWindows
             var feedService = new NuGetFeedService();
             var restoreMonitor = new RestoreMonitorService();
             var mruService = new MruPackageService();
-            var viewModePreferences = new ViewModePreferenceService();
 
-            var viewModel = new MainViewModel(projectService, feedService, restoreMonitor, mruService, viewModePreferences);
+            var viewModel = new MainViewModel(projectService, feedService, restoreMonitor, mruService);
             await viewModel.InitializeAsync(cancellationToken);
 
             // CreateAsync runs before the tool window is actually presented to

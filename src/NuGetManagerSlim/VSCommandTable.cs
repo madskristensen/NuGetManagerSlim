@@ -34,6 +34,7 @@ namespace NuGetManagerSlim
         public const int NuGetQuickManagerToolbarRefreshGroup = 0x1102;
         public const int ViewModeMenuController = 0x1104;
         public const int ViewModeMenuGroup = 0x1105;
+        public const int ViewModeAnchorCommand = 0x0215;
         public const int ViewModeBrowseCommand = 0x0210;
         public const int ViewModeInstalledCommand = 0x0211;
         public const int ViewModeUpdatesCommand = 0x0212;

@@ -15,8 +15,7 @@ namespace NuGetManagerSlim.Tests.ViewModels
     {
         private static (MainViewModel vm, Mock<IProjectService> proj, Mock<INuGetFeedService> feed, Mock<IRestoreMonitorService> restore)
             CreateViewModel(
-                IReadOnlyList<PackageSourceModel>? sources = null,
-                IViewModePreferenceService? viewModePreferences = null)
+                IReadOnlyList<PackageSourceModel>? sources = null)
         {
             var projMock = new Mock<IProjectService>();
             var feedMock = new Mock<INuGetFeedService>();
@@ -31,7 +30,7 @@ namespace NuGetManagerSlim.Tests.ViewModels
             restoreMock.Setup(r => r.StartMonitoring(It.IsAny<ProjectScopeModel>()));
             restoreMock.Setup(r => r.StopMonitoring());
 
-            var vm = new MainViewModel(projMock.Object, feedMock.Object, restoreMock.Object, mruService: null, viewModePreferences);
+            var vm = new MainViewModel(projMock.Object, feedMock.Object, restoreMock.Object, mruService: null);
             return (vm, projMock, feedMock, restoreMock);
         }
 
@@ -409,35 +408,6 @@ namespace NuGetManagerSlim.Tests.ViewModels
 
             Assert.Equal(PackageViewMode.Deprecated, vm.ViewMode);
             Assert.True(vm.FilterDeprecated);
-        }
-
-        [Fact]
-        public async Task InitializeAsync_RestoresSavedViewMode()
-        {
-            // Issue #23: VS persists the view-mode menu controller's anchor icon
-            // across restarts, so the mode must be restored on startup or the
-            // icon, dropdown check mark, and package list disagree.
-            var prefs = new Mock<IViewModePreferenceService>();
-            prefs.Setup(p => p.GetAsync(It.IsAny<CancellationToken>()))
-                .ReturnsAsync(PackageViewMode.Installed);
-
-            var (vm, _, _, _) = CreateViewModel(viewModePreferences: prefs.Object);
-
-            await vm.InitializeAsync(CancellationToken.None);
-
-            Assert.Equal(PackageViewMode.Installed, vm.ViewMode);
-            Assert.True(vm.FilterInstalled);
-        }
-
-        [Fact]
-        public void ViewMode_WhenChanged_PersistsSelection()
-        {
-            var prefs = new Mock<IViewModePreferenceService>();
-            var (vm, _, _, _) = CreateViewModel(viewModePreferences: prefs.Object);
-
-            vm.ViewMode = PackageViewMode.Updates;
-
-            prefs.Verify(p => p.SaveAsync(PackageViewMode.Updates, It.IsAny<CancellationToken>()), Times.Once);
         }
 
         [Fact]

@@ -45,7 +45,7 @@ Installed packages pin to the top of the Browse list with a clear "Installed" ba
 
 ### Switch scope in a click
 
-Toggle the view between **All packages**, **Installed**, **Updates available**, **Vulnerable**, and **Deprecated** from the toolbar. The list re-renders instantly without re-querying the feed, and your last selected view is remembered and restored the next time you open the tool window.
+Toggle the view between **All packages**, **Installed**, **Updates available**, **Vulnerable**, and **Deprecated** from the toolbar. The list re-renders instantly without re-querying the feed.
 
 ![Scope selector](art/scope.png)
 

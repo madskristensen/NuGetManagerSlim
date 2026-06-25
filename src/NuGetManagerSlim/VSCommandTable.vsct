@@ -18,7 +18,7 @@
       <Menu guid="NuGetManagerSlim" id="ViewModeMenuController" priority="0x0150" type="MenuController">
         <Parent guid="NuGetManagerSlim" id="NuGetQuickManagerToolbarGroup" />
         <Strings>
-          <ButtonText>All packages</ButtonText>
+          <ButtonText>View mode</ButtonText>
           <CommandName>View mode</CommandName>
         </Strings>
       </Menu>
@@ -43,6 +43,26 @@
     </Groups>
 
     <Buttons>
+      <!-- Permanent neutral anchor for the view-mode menu controller. Without
+           this, Visual Studio adopts the last-invoked child command's icon as
+           the toolbar anchor and persists it independently of the package list,
+           so the toolbar icon and the dropdown check mark could disagree
+           (issues #23 / #28). FixMenuController pins the anchor; the funnel icon
+           never claims to be a specific mode, leaving the dropdown check mark
+           (driven by ViewMode) as the single source of truth.
+           NoShowOnMenuController keeps this anchor out of the dropdown list. -->
+      <Button guid="NuGetManagerSlim" id="ViewModeAnchorCommand" priority="0x0001" type="Button">
+        <Parent guid="NuGetManagerSlim" id="ViewModeMenuGroup" />
+        <Icon guid="ImageCatalogGuid" id="Filter" />
+        <CommandFlag>IconIsMoniker</CommandFlag>
+        <CommandFlag>FixMenuController</CommandFlag>
+        <CommandFlag>NoShowOnMenuController</CommandFlag>
+        <Strings>
+          <ButtonText>View mode</ButtonText>
+          <ToolTipText>Choose which packages to show</ToolTipText>
+        </Strings>
+      </Button>
+
       <Button guid="NuGetManagerSlim" id="ViewModeBrowseCommand" priority="0x0100" type="Button">
         <Parent guid="NuGetManagerSlim" id="ViewModeMenuGroup" />
         <Icon guid="ImageCatalogGuid" id="NuGet" />
@@ -145,6 +165,7 @@
       <IDSymbol name="ViewModeMenuController"               value="0x1104" />
       <IDSymbol name="ViewModeMenuGroup"                    value="0x1105" />
 
+      <IDSymbol name="ViewModeAnchorCommand"                value="0x0215" />
       <IDSymbol name="ViewModeBrowseCommand"                value="0x0210" />
       <IDSymbol name="ViewModeInstalledCommand"             value="0x0211" />
       <IDSymbol name="ViewModeUpdatesCommand"               value="0x0212" />
