@@ -986,7 +986,24 @@ namespace NuGetManagerSlim.Services
                     catch { /* search fallback is best-effort */ }
                 }
 
-                var (isDeprecated, deprecationReason) = await MapDeprecationAsync(latest).ConfigureAwait(false);
+                // Deprecation is per-version: a package can be deprecated at the
+                // installed version while a newer, non-deprecated version exists.
+                // Resolve the installed version's status first so the badge stays
+                // consistent with the dedicated Deprecated view, then fall back to
+                // the latest version's status so a package deprecated only at its
+                // newest version is still flagged (issue #31).
+                var (latestDeprecated, latestReason) = await MapDeprecationAsync(latest).ConfigureAwait(false);
+                bool isDeprecated = latestDeprecated;
+                string? deprecationReason = latestReason;
+                if (installedMeta != null && !ReferenceEquals(installedMeta, latest))
+                {
+                    var (installedDeprecated, installedReason) = await MapDeprecationAsync(installedMeta).ConfigureAwait(false);
+                    if (installedDeprecated)
+                    {
+                        isDeprecated = true;
+                        deprecationReason = installedReason ?? latestReason;
+                    }
+                }
 
                 var latestModel = new PackageModel
                 {
