@@ -784,11 +784,16 @@ namespace NuGetManagerSlim.ViewModels
                     _packages.ReplaceAll(rows.OrderBy(r => r.IsTransitive).ThenBy(r => r.PackageId));
                     SeedMruFromInstalled(installed);
 
-                    // Run the same background metadata pass the Installed/Browse
-                    // views use so the rows get the full set of details (icon,
-                    // description, update badge). Cached metadata makes this a cheap
-                    // set of cache hits on repeat visits.
-                    EnrichInstalledInBackground(Packages.ToList(), ReplaceCts(ref _enrichCts));
+                    // EnrichDeprecationAsync above already resolved each surviving
+                    // row's full metadata (icon, latest version, description,
+                    // deprecation) and its vulnerability badge from a single
+                    // registration fetch per package, so the rows are display-ready.
+                    // Starting the Installed/Browse background pass here would
+                    // re-fetch the same registration data per package for no added
+                    // detail, so it's intentionally omitted (one fetch per package).
+                    // Cancel any enrichment still running from a prior view so it
+                    // can't keep working against rows we've just replaced.
+                    CancelCts(ref _enrichCts);
                     return;
                 }
 
@@ -937,14 +942,17 @@ namespace NuGetManagerSlim.ViewModels
             }
         }
 
-        // Resolves each installed package's deprecation status for its installed
-        // version. Used by the Deprecated view, which must know whether the
-        // *installed* version (not just the latest) is deprecated before it can
-        // decide whether to keep the row.
+        // Resolves each installed package's full metadata for its installed
+        // version in a single registration fetch per package: the deprecation
+        // status (the Deprecated view must know whether the *installed* version,
+        // not just the latest, is deprecated before it can decide whether to keep
+        // the row), plus the icon, latest-version/update badge, description, and
+        // the installed version's vulnerability advisories. Folding every detail
+        // into this one fetch means the Deprecated view never needs a second
+        // background enrichment pass.
         private async Task EnrichDeprecationAsync(IReadOnlyList<PackageRowViewModel> rows, CancellationToken ct)
         {
             if (rows == null || rows.Count == 0) return;
-            await TaskScheduler.Default;
             var tasks = rows.Select(async row =>
             {
                 if (ct.IsCancellationRequested) return;
@@ -956,6 +964,15 @@ namespace NuGetManagerSlim.ViewModels
                     var meta = await _feedService.GetPackageMetadataAsync(row.PackageId, version, ct).ConfigureAwait(false);
                     if (meta == null || ct.IsCancellationRequested) return;
                     row.ApplyMetadata(meta);
+
+                    // Surface the installed version's advisories from the same
+                    // registration fetch. ApplyMetadata deliberately leaves the
+                    // vulnerability override untouched (advisories flow through a
+                    // separate channel), so applying them here lets the Deprecated
+                    // view show the vulnerability badge from this single fetch -
+                    // without a second per-package enrichment pass.
+                    if (meta.Vulnerabilities.Count > 0)
+                        row.ApplyVulnerabilities(meta.Vulnerabilities);
                 }
                 catch (OperationCanceledException) { }
                 catch (Exception ex) { await ex.LogAsync(); }

@@ -1322,27 +1322,13 @@ namespace NuGetManagerSlim.Services
 
         private static async Task<PackageVersionInfo> BuildVersionInfoAsync(IPackageSearchMetadata metadata)
         {
-            var isVulnerable = metadata.Vulnerabilities != null && metadata.Vulnerabilities.Any();
-
-            var isDeprecated = false;
-            string? reason = null;
-            try
-            {
-                var deprecation = await metadata.GetDeprecationMetadataAsync().ConfigureAwait(false);
-                if (deprecation != null)
-                {
-                    isDeprecated = true;
-                    reason = deprecation.Reasons != null && deprecation.Reasons.Any()
-                        ? string.Join(", ", deprecation.Reasons)
-                        : deprecation.Message;
-                }
-            }
-            catch (OperationCanceledException) { throw; }
-            catch
-            {
-                // Deprecation lookup is best-effort; a failure shouldn't drop the
-                // version from the list.
-            }
+            // Derive the per-version deprecated / vulnerable status through the
+            // same helpers every other feed path uses so the dropdown can't drift
+            // from the list and detail views (single source of truth / DRY). Both
+            // read from the registration leaf we already fetched, so neither
+            // issues an extra round trip for v3 feeds.
+            var isVulnerable = MapVulnerabilities(metadata).Count > 0;
+            var (isDeprecated, reason) = await MapDeprecationAsync(metadata).ConfigureAwait(false);
 
             return new PackageVersionInfo(metadata.Identity.Version, isDeprecated, isVulnerable, reason);
         }

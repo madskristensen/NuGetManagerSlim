@@ -300,6 +300,79 @@ namespace NuGetManagerSlim.Tests.ViewModels
         }
 
         [Fact]
+        public async Task DeprecatedView_EnrichesFromSingleFetch_WithoutInstalledEnrichment()
+        {
+            // The Deprecated view resolves each row's deprecation status, latest
+            // metadata, and the installed version's vulnerability badge from one
+            // versioned registration fetch per package. It must not also issue the
+            // Installed/Browse GetInstalledEnrichmentAsync pass, which would be a
+            // redundant second registration round trip per package.
+            var version = NuGetVersion.Parse("1.0.0");
+            var installed = new List<PackageModel>
+            {
+                new() { PackageId = "DeprecatedPkg", InstalledVersion = version },
+            };
+
+            var projMock = new Mock<IProjectService>();
+            var feedMock = new Mock<INuGetFeedService>();
+            var restoreMock = new Mock<IRestoreMonitorService>();
+
+            feedMock.Setup(f => f.GetSourcesAsync(It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<PackageSourceModel>());
+            projMock.Setup(p => p.GetInstalledPackagesAsync(It.IsAny<ProjectScopeModel>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(installed);
+            projMock.Setup(p => p.GetTransitivePackagesAsync(It.IsAny<ProjectScopeModel>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<PackageModel>());
+
+            feedMock.Setup(f => f.GetPackageMetadataAsync("DeprecatedPkg", It.IsAny<NuGetVersion>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new PackageModel
+                {
+                    PackageId = "DeprecatedPkg",
+                    LatestStableVersion = NuGetVersion.Parse("2.0.0"),
+                    Description = "A package",
+                    IsDeprecated = true,
+                    DeprecationReason = "Legacy",
+                    Vulnerabilities = new[]
+                    {
+                        new PackageVulnerabilityInfo { Severity = 3, AdvisoryUrl = "https://example.com/a" },
+                    },
+                });
+
+            var vm = new MainViewModel(projMock.Object, feedMock.Object, restoreMock.Object);
+            await vm.InitializeAsync(CancellationToken.None);
+            await vm.SetCurrentProjectAsync(@"C:\MyApp\MyApp.csproj", "MyApp");
+
+            // The default Browse load pins and enriches installed packages via
+            // GetInstalledEnrichmentAsync. Let that settle, then clear the recorded
+            // invocations so the assertion below only observes the Deprecated view.
+            await Task.Delay(50);
+            feedMock.Invocations.Clear();
+
+            vm.ViewMode = PackageViewMode.Deprecated;
+
+            PackageRowViewModel? row = null;
+            for (int i = 0; i < 200; i++)
+            {
+                row = vm.Packages.FirstOrDefault(p => p.PackageId == "DeprecatedPkg");
+                if (!vm.IsLoading && row != null && row.IsDeprecated && row.HasVulnerabilities)
+                    break;
+                await Task.Delay(10);
+            }
+
+            Assert.NotNull(row);
+            Assert.True(row!.IsDeprecated);
+            Assert.True(row.HasVulnerabilities);
+            Assert.Equal(NuGetVersion.Parse("2.0.0"), row.LatestStableVersion);
+
+            // Give any (unwanted) background enrichment a chance to run before
+            // asserting it never happened.
+            await Task.Delay(50);
+            feedMock.Verify(
+                f => f.GetInstalledEnrichmentAsync(It.IsAny<string>(), It.IsAny<NuGetVersion?>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()),
+                Times.Never);
+        }
+
+        [Fact]
         public void ViewMode_SetToBrowse_ClearsFilters()
         {
             var (vm, _, _, _) = CreateViewModel();
