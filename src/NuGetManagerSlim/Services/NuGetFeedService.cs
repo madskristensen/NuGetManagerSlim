@@ -754,41 +754,15 @@ namespace NuGetManagerSlim.Services
                 var (maxStableByMajor, maxPrereleaseByMajor) = BuildMaxByMajor(
                     allMetadata.Select(m => m.Identity.Version));
 
-                var deps = latest.DependencySets
-                    .SelectMany(ds => ds.Packages.Select(p => new PackageDependencyInfo
-                    {
-                        PackageId = p.Id,
-                        VersionRange = p.VersionRange?.ToString() ?? "*",
-                        TargetFramework = ds.TargetFramework?.GetShortFolderName() ?? string.Empty,
-                    }))
-                    .ToList();
-
                 long downloadCount = await ResolveDownloadCountAsync(
                     source, packageId, latest.DownloadCount ?? 0, cancellationToken).ConfigureAwait(false);
 
                 var (isDeprecated, deprecationReason) = await MapDeprecationAsync(latest).ConfigureAwait(false);
 
-                return SourceMetadataOutcome.Hit(new PackageModel
-                {
-                    PackageId = latest.Identity.Id,
-                    LatestStableVersion = latestStable,
-                    LatestPrereleaseVersion = latestPrerelease,
-                    MaxStableByMajor = maxStableByMajor,
-                    MaxPrereleaseByMajor = maxPrereleaseByMajor,
-                    Description = latest.Description,
-                    Authors = latest.Authors,
-                    LicenseExpression = latest.LicenseMetadata?.License,
-                    LicenseUrl = latest.LicenseUrl?.ToString(),
-                    DownloadCount = downloadCount,
-                    SourceName = source.Name,
-                    ProjectUrl = latest.ProjectUrl?.ToString(),
-                    IconUrl = latest.IconUrl?.ToString(),
-                    Published = latest.Published,
-                    Dependencies = deps,
-                    Vulnerabilities = MapVulnerabilities(latest),
-                    IsDeprecated = isDeprecated,
-                    DeprecationReason = deprecationReason,
-                });
+                return SourceMetadataOutcome.Hit(BuildPackageModel(
+                    latest, source.Name, latestStable, latestPrerelease,
+                    maxStableByMajor, maxPrereleaseByMajor, downloadCount,
+                    isDeprecated, deprecationReason));
             }
             catch (OperationCanceledException)
             {
@@ -932,15 +906,6 @@ namespace NuGetManagerSlim.Services
                 var (maxStableByMajor, maxPrereleaseByMajor) = BuildMaxByMajor(
                     listed.Select(m => m.Identity.Version));
 
-                var deps = latest.DependencySets
-                    .SelectMany(ds => ds.Packages.Select(p => new PackageDependencyInfo
-                    {
-                        PackageId = p.Id,
-                        VersionRange = p.VersionRange?.ToString() ?? "*",
-                        TargetFramework = ds.TargetFramework?.GetShortFolderName() ?? string.Empty,
-                    }))
-                    .ToList();
-
                 // Same nuget.org-only download-count fallback as the latest path,
                 // but skipped entirely when the caller already has a count for the
                 // row - that removes a redundant per-package search round trip.
@@ -970,27 +935,10 @@ namespace NuGetManagerSlim.Services
                     }
                 }
 
-                var latestModel = new PackageModel
-                {
-                    PackageId = latest.Identity.Id,
-                    LatestStableVersion = latestStable,
-                    LatestPrereleaseVersion = latestPrerelease,
-                    MaxStableByMajor = maxStableByMajor,
-                    MaxPrereleaseByMajor = maxPrereleaseByMajor,
-                    Description = latest.Description,
-                    Authors = latest.Authors,
-                    LicenseExpression = latest.LicenseMetadata?.License,
-                    LicenseUrl = latest.LicenseUrl?.ToString(),
-                    DownloadCount = downloadCount,
-                    SourceName = source.Name,
-                    ProjectUrl = latest.ProjectUrl?.ToString(),
-                    IconUrl = latest.IconUrl?.ToString(),
-                    Published = latest.Published,
-                    Dependencies = deps,
-                    Vulnerabilities = MapVulnerabilities(latest),
-                    IsDeprecated = isDeprecated,
-                    DeprecationReason = deprecationReason,
-                };
+                var latestModel = BuildPackageModel(
+                    latest, source.Name, latestStable, latestPrerelease,
+                    maxStableByMajor, maxPrereleaseByMajor, downloadCount,
+                    isDeprecated, deprecationReason);
 
                 return InstalledEnrichmentOutcome.Found(latestModel, installedVulnerabilities);
             }
@@ -1063,8 +1011,59 @@ namespace NuGetManagerSlim.Services
             return list;
         }
 
-        // Reads the feed's deprecation metadata for the displayed version so a
-        // deprecated package can be flagged in every list view (issue #20). The
+        // Single source of truth for projecting a resolved registration entry onto
+        // our PackageModel. The display entry supplies the descriptive fields,
+        // dependency groups, and vulnerability advisories; the version slots,
+        // download count, and deprecation status are computed by each caller
+        // because they legitimately differ per fetch path (installed-version vs
+        // latest-version deprecation, the gated download-count fallback, and which
+        // version the display fields describe). Centralizing the projection keeps
+        // the latest / installed-enrichment / versioned paths from drifting apart -
+        // the versioned path had already dropped the Published date, for instance.
+        private static PackageModel BuildPackageModel(
+            IPackageSearchMetadata display,
+            string sourceName,
+            NuGetVersion? latestStable,
+            NuGetVersion? latestPrerelease,
+            IReadOnlyDictionary<int, NuGetVersion> maxStableByMajor,
+            IReadOnlyDictionary<int, NuGetVersion> maxPrereleaseByMajor,
+            long downloadCount,
+            bool isDeprecated,
+            string? deprecationReason)
+        {
+            var deps = display.DependencySets
+                .SelectMany(ds => ds.Packages.Select(p => new PackageDependencyInfo
+                {
+                    PackageId = p.Id,
+                    VersionRange = p.VersionRange?.ToString() ?? "*",
+                    TargetFramework = ds.TargetFramework?.GetShortFolderName() ?? string.Empty,
+                }))
+                .ToList();
+
+            return new PackageModel
+            {
+                PackageId = display.Identity.Id,
+                LatestStableVersion = latestStable,
+                LatestPrereleaseVersion = latestPrerelease,
+                MaxStableByMajor = maxStableByMajor,
+                MaxPrereleaseByMajor = maxPrereleaseByMajor,
+                Description = display.Description,
+                Authors = display.Authors,
+                LicenseExpression = display.LicenseMetadata?.License,
+                LicenseUrl = display.LicenseUrl?.ToString(),
+                DownloadCount = downloadCount,
+                SourceName = sourceName,
+                ProjectUrl = display.ProjectUrl?.ToString(),
+                IconUrl = display.IconUrl?.ToString(),
+                Published = display.Published,
+                Dependencies = deps,
+                Vulnerabilities = MapVulnerabilities(display),
+                IsDeprecated = isDeprecated,
+                DeprecationReason = deprecationReason,
+            };
+        }
+
+
         // lookup is best-effort: a failure or a feed that doesn't expose
         // deprecation data simply leaves the package unflagged.
         private static async Task<(bool IsDeprecated, string? Reason)> MapDeprecationAsync(IPackageSearchMetadata metadata)
@@ -1181,15 +1180,6 @@ namespace NuGetManagerSlim.Services
                 var (maxStableByMajor, maxPrereleaseByMajor) = BuildMaxByMajor(
                     allMetadata.Select(m => m.Identity.Version));
 
-                var deps = meta.DependencySets
-                    .SelectMany(ds => ds.Packages.Select(p => new PackageDependencyInfo
-                    {
-                        PackageId = p.Id,
-                        VersionRange = p.VersionRange?.ToString() ?? "*",
-                        TargetFramework = ds.TargetFramework?.GetShortFolderName() ?? string.Empty,
-                    }))
-                    .ToList();
-
                 // Same nuget.org-only guard as the latest-metadata path: skip the
                 // search-resource fallback on feeds that never expose download counts.
                 long downloadCount = await ResolveDownloadCountAsync(
@@ -1197,26 +1187,10 @@ namespace NuGetManagerSlim.Services
 
                 var (isDeprecated, deprecationReason) = await MapDeprecationAsync(meta).ConfigureAwait(false);
 
-                return SourceMetadataOutcome.Hit(new PackageModel
-                {
-                    PackageId = meta.Identity.Id,
-                    LatestStableVersion = latestStable,
-                    LatestPrereleaseVersion = latestPrerelease,
-                    MaxStableByMajor = maxStableByMajor,
-                    MaxPrereleaseByMajor = maxPrereleaseByMajor,
-                    Description = meta.Description,
-                    Authors = meta.Authors,
-                    LicenseExpression = meta.LicenseMetadata?.License,
-                    LicenseUrl = meta.LicenseUrl?.ToString(),
-                    DownloadCount = downloadCount,
-                    SourceName = source.Name,
-                    ProjectUrl = meta.ProjectUrl?.ToString(),
-                    IconUrl = meta.IconUrl?.ToString(),
-                    Dependencies = deps,
-                    Vulnerabilities = MapVulnerabilities(meta),
-                    IsDeprecated = isDeprecated,
-                    DeprecationReason = deprecationReason,
-                });
+                return SourceMetadataOutcome.Hit(BuildPackageModel(
+                    meta, source.Name, latestStable, latestPrerelease,
+                    maxStableByMajor, maxPrereleaseByMajor, downloadCount,
+                    isDeprecated, deprecationReason));
             }
             catch (OperationCanceledException) { throw; }
             catch
