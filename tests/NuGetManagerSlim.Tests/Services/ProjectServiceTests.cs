@@ -467,5 +467,66 @@ namespace NuGetManagerSlim.Tests.Services
             var imported = Assert.Single(packages, p => p.PackageId == "Microsoft.Extensions.Logging");
             Assert.Equal(new[] { "net8.0" }, imported.ReferencingFrameworks);
         }
+
+        [Fact]
+        public void ReadInstalledFromProjectWithImports_FrameworkInDirectoryBuildProps_ResolvesCap()
+        {
+            // Issue #32: the project centralizes <TargetFramework> in a
+            // Directory.Build.props, so the csproj declares none. The cap must
+            // still resolve from the import, otherwise a runtime-locked family
+            // (e.g. Microsoft.Windows.Compatibility) is wrongly offered a higher
+            // major.
+            var projDir = Path.Combine(_tempDir, "App");
+            Directory.CreateDirectory(projDir);
+            var proj = Path.Combine(projDir, "App.csproj");
+
+            File.WriteAllText(proj, """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <ItemGroup>
+                    <PackageReference Include="Microsoft.Windows.Compatibility" Version="8.0.28" />
+                  </ItemGroup>
+                </Project>
+                """);
+            File.WriteAllText(Path.Combine(_tempDir, "Directory.Build.props"), """
+                <Project>
+                  <PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup>
+                </Project>
+                """);
+
+            var packages = ProjectService.ReadInstalledFromProjectWithImports(proj, CancellationToken.None);
+
+            var pkg = Assert.Single(packages, p => p.PackageId == "Microsoft.Windows.Compatibility");
+            Assert.Equal(new[] { "net8.0" }, pkg.ReferencingFrameworks);
+            Assert.Equal(8, TargetFrameworkCap.ResolveCap(pkg.ReferencingFrameworks));
+        }
+
+        [Fact]
+        public void ReadInstalledFromProjectWithImports_FrameworkExpressionInProps_DoesNotResolveCap()
+        {
+            // An unevaluated MSBuild expression in the import must not be treated
+            // as a literal moniker; with no resolvable framework there is no cap.
+            var projDir = Path.Combine(_tempDir, "App");
+            Directory.CreateDirectory(projDir);
+            var proj = Path.Combine(projDir, "App.csproj");
+
+            File.WriteAllText(proj, """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <ItemGroup>
+                    <PackageReference Include="Microsoft.Windows.Compatibility" Version="8.0.28" />
+                  </ItemGroup>
+                </Project>
+                """);
+            File.WriteAllText(Path.Combine(_tempDir, "Directory.Build.props"), """
+                <Project>
+                  <PropertyGroup><TargetFramework>$(DefaultTfm)</TargetFramework></PropertyGroup>
+                </Project>
+                """);
+
+            var packages = ProjectService.ReadInstalledFromProjectWithImports(proj, CancellationToken.None);
+
+            var pkg = Assert.Single(packages, p => p.PackageId == "Microsoft.Windows.Compatibility");
+            Assert.Empty(pkg.ReferencingFrameworks);
+            Assert.Null(TargetFrameworkCap.ResolveCap(pkg.ReferencingFrameworks));
+        }
     }
 }

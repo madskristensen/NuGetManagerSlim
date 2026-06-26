@@ -71,6 +71,12 @@ namespace NuGetManagerSlim.Services
             "System.Linq.Dynamic",    // System.Linq.Dynamic.Core (1.x)
             "System.IO.Abstractions", // TestableIO (21.x)
             "System.CommandLine",     // independent cadence (2.x)
+            // The WCF client family (dotnet/wcf) shares the System.ServiceModel
+            // prefix but ships on its own cadence, only in pseudo-lockstep with
+            // the runtime, so a net8.0 project can move to a higher major. Covers
+            // System.ServiceModel.Http/.Primitives/.Duplex/.NetTcp/.Security/
+            // .Federation (issue #32).
+            "System.ServiceModel",
         };
 
         /// <summary>

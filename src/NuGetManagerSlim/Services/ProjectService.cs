@@ -227,9 +227,14 @@ namespace NuGetManagerSlim.Services
             // The project's own target framework(s) attribute every package it
             // declares so the per-package update cap can be resolved later from
             // only the frameworks that actually reference the package (issue #30).
+            // SDK-style projects commonly centralize the framework in a
+            // Directory.Build.props above the project, so fall back to it when the
+            // project file itself declares none (issue #32).
             var frameworks = doc?.Root != null
                 ? ExtractTargetFrameworks(doc)
                 : (IReadOnlyList<string>)Array.Empty<string>();
+            if (frameworks.Count == 0)
+                frameworks = ReadTargetFrameworksFromImports(projectFullPath);
 
             if (doc?.Root != null)
             {
@@ -416,8 +421,67 @@ namespace NuGetManagerSlim.Services
 
             if (doc?.Root == null) return Array.Empty<string>();
 
-            return ExtractTargetFrameworks(doc);
+            var fromProject = ExtractTargetFrameworks(doc);
+            if (fromProject.Count > 0) return fromProject;
+
+            // SDK-style projects frequently centralize <TargetFramework(s)> in a
+            // Directory.Build.props above the project. When the project file
+            // declares none, walk up and read the nearest import that does, so the
+            // per-package update cap still applies to net-major targets (issue #32).
+            return ReadTargetFrameworksFromImports(projectFullPath);
         }
+
+        // Walks up from the project directory looking for the nearest
+        // Directory.Build.props / Directory.Build.targets that declares a literal
+        // target framework, mirroring how MSBuild imports the closest file. Only
+        // literal monikers are honored; entries containing MSBuild expressions
+        // ($(...) / @(...)) are skipped because we don't evaluate MSBuild here.
+        // Best-effort: returns an empty list when nothing literal is found.
+        private static IReadOnlyList<string> ReadTargetFrameworksFromImports(string projectFullPath)
+        {
+            var projectDir = Path.GetDirectoryName(projectFullPath);
+            if (string.IsNullOrEmpty(projectDir)) return Array.Empty<string>();
+
+            DirectoryInfo? dir;
+            try { dir = new DirectoryInfo(projectDir); }
+            catch { return Array.Empty<string>(); }
+
+            while (dir != null)
+            {
+                foreach (var fileName in ImportFileNames)
+                {
+                    string path;
+                    try { path = Path.Combine(dir.FullName, fileName); }
+                    catch { continue; }
+
+                    if (!File.Exists(path)) continue;
+
+                    XDocument? doc;
+                    try { doc = XDocument.Load(path); }
+                    catch { continue; }
+
+                    if (doc?.Root == null) continue;
+
+                    var tfms = ExtractTargetFrameworks(doc)
+                        .Where(t => t.IndexOf("$(", StringComparison.Ordinal) < 0
+                                 && t.IndexOf("@(", StringComparison.Ordinal) < 0)
+                        .ToList();
+
+                    if (tfms.Count > 0) return tfms;
+                }
+
+                try { dir = dir.Parent; }
+                catch { break; }
+            }
+
+            return Array.Empty<string>();
+        }
+
+        private static readonly string[] ImportFileNames =
+        {
+            "Directory.Build.props",
+            "Directory.Build.targets",
+        };
 
         // Pulls the target framework moniker(s) out of an already-loaded project
         // document, so callers that parse the project file for other reasons

@@ -87,6 +87,12 @@ namespace NuGetManagerSlim.Tests.Services
         [InlineData("System.IO.Abstractions", false)]
         [InlineData("System.IO.Abstractions.TestingHelpers", false)]
         [InlineData("System.CommandLine", false)]
+        // WCF client family (dotnet/wcf) versions independently of the runtime
+        // even though it matches the System. prefix (issue #32).
+        [InlineData("System.ServiceModel", false)]
+        [InlineData("System.ServiceModel.Http", false)]
+        [InlineData("System.ServiceModel.Primitives", false)]
+        [InlineData("System.ServiceModel.NetTcp", false)]
         // Runtime-shipped System.* packages stay capped.
         [InlineData("System.IO.Pipelines", true)]
         [InlineData("System.Configuration.ConfigurationManager", true)]
