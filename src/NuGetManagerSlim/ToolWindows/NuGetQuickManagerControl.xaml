@@ -169,6 +169,27 @@
                 </DataTrigger>
             </Style.Triggers>
         </Style>
+
+        <!-- Read-only TextBox dressed up to look exactly like a TextBlock, so the
+             detail-pane text reads as a label but can be selected with the mouse
+             and copied with Ctrl+C (or the built-in TextBox context menu). WPF on
+             .NET Framework can't make a plain TextBlock selectable, so this is the
+             lightest way to give every plain-text field copy support (issue #33). -->
+        <Style x:Key="SelectableTextStyle" TargetType="TextBox">
+            <Setter Property="IsReadOnly" Value="True" />
+            <Setter Property="IsReadOnlyCaretVisible" Value="False" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowTextKey}}" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="HorizontalScrollBarVisibility" Value="Disabled" />
+            <Setter Property="VerticalScrollBarVisibility" Value="Disabled" />
+        </Style>
+        <Style x:Key="SelectableMutedTextStyle" TargetType="TextBox" BasedOn="{StaticResource SelectableTextStyle}">
+            <Setter Property="Foreground" Value="{DynamicResource {x:Static vsshell:VsBrushes.GrayTextKey}}" />
+            <Setter Property="FontSize" Value="11" />
+        </Style>
         <!-- Pill that marks installed packages in the Browse list. Hidden in
              the Installed scope (where every row is installed and the badge
              would just be noise). -->
@@ -725,11 +746,12 @@
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0"
-                                   Text="{Binding Detail.PackageId}"
+                            <TextBox Grid.Column="0"
+                                   Text="{Binding Detail.PackageId, Mode=OneWay}"
+                                   Style="{StaticResource SelectableTextStyle}"
                                    FontSize="15" FontWeight="Bold"
-                                   VerticalAlignment="Center"
-                                   TextTrimming="CharacterEllipsis" />
+                                   TextWrapping="NoWrap"
+                                   VerticalAlignment="Center" />
                             <ComboBox Grid.Column="1"
                                   ItemsSource="{Binding Detail.AvailableVersions}"
                                   SelectedItem="{Binding Detail.SelectedVersionItem}"
@@ -794,11 +816,8 @@
                         </Grid>
 
                         <!-- Description -->
-                        <TextBlock Text="{Binding Detail.Description}"
-                               TextWrapping="Wrap"
-                               Style="{StaticResource MutedTextStyle}"
-                               LineHeight="18"
-                               LineStackingStrategy="BlockLineHeight"
+                        <TextBox Text="{Binding Detail.Description, Mode=OneWay}"
+                               Style="{StaticResource SelectableMutedTextStyle}"
                                Margin="0,2,0,10" />
 
                         <!-- Security vulnerabilities for the selected version -->
@@ -853,9 +872,9 @@
                                                Margin="6,0,0,0" VerticalAlignment="Center"
                                                Foreground="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowTextKey}}" />
                                 </StackPanel>
-                                <TextBlock Text="{Binding Detail.DeprecationReason}"
-                                           FontSize="11" TextWrapping="Wrap"
-                                           Foreground="{DynamicResource {x:Static vsshell:VsBrushes.ToolWindowTextKey}}"
+                                <TextBox Text="{Binding Detail.DeprecationReason, Mode=OneWay}"
+                                           Style="{StaticResource SelectableTextStyle}"
+                                           FontSize="11"
                                            Visibility="{Binding Detail.HasDeprecationReason, Converter={StaticResource BoolToVis}}" />
                             </StackPanel>
                         </Border>
@@ -867,16 +886,25 @@
                                 <Run Text="{Binding Detail.License}" />
                             </Hyperlink>
                             </TextBlock>
-                            <TextBlock Style="{StaticResource MutedTextStyle}" Margin="0,0,12,0">
-                            <Run Text="Downloads: " /><Run Text="{Binding Detail.DownloadCountDisplay}" />
-                            </TextBlock>
-                            <TextBlock Style="{StaticResource MutedTextStyle}" Margin="0,0,12,0">
-                            <Run Text="Authors: " /><Run Text="{Binding Detail.Authors}" />
-                            </TextBlock>
-                            <TextBlock Style="{StaticResource MutedTextStyle}" Margin="0,0,12,0"
+                            <StackPanel Orientation="Horizontal" Margin="0,0,12,0">
+                                <TextBlock Style="{StaticResource MutedTextStyle}" Text="Downloads: " VerticalAlignment="Center" />
+                                <TextBox Style="{StaticResource SelectableMutedTextStyle}"
+                                         Text="{Binding Detail.DownloadCountDisplay, Mode=OneWay}"
+                                         TextWrapping="NoWrap" VerticalAlignment="Center" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,12,0">
+                                <TextBlock Style="{StaticResource MutedTextStyle}" Text="Authors: " VerticalAlignment="Center" />
+                                <TextBox Style="{StaticResource SelectableMutedTextStyle}"
+                                         Text="{Binding Detail.Authors, Mode=OneWay}"
+                                         TextWrapping="NoWrap" VerticalAlignment="Center" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,12,0"
                                    Visibility="{Binding Detail.HasPublished, Converter={StaticResource BoolToVis}}">
-                            <Run Text="Last updated: " /><Run Text="{Binding Detail.PublishedDisplay}" />
-                            </TextBlock>
+                                <TextBlock Style="{StaticResource MutedTextStyle}" Text="Last updated: " VerticalAlignment="Center" />
+                                <TextBox Style="{StaticResource SelectableMutedTextStyle}"
+                                         Text="{Binding Detail.PublishedDisplay, Mode=OneWay}"
+                                         TextWrapping="NoWrap" VerticalAlignment="Center" />
+                            </StackPanel>
                             <TextBlock Style="{StaticResource MutedTextStyle}"
                                    Visibility="{Binding Detail.HasProjectUrl, Converter={StaticResource BoolToVis}}">
                             <Hyperlink Command="{Binding Detail.OpenProjectUrlCommand}"
@@ -911,8 +939,38 @@
                                             <imaging:CrispImage Width="14" Height="14"
                                                                 Moniker="{x:Static catalog:KnownMonikers.NuGet}"
                                                                 VerticalAlignment="Center" />
-                                            <TextBlock Text="{Binding}"
-                                                       Style="{StaticResource MutedTextStyle}"
+                                            <TextBox Text="{Binding Mode=OneWay}"
+                                                       Style="{StaticResource SelectableMutedTextStyle}"
+                                                       TextWrapping="NoWrap"
+                                                       Margin="6,0,0,0"
+                                                       VerticalAlignment="Center" />
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </Expander>
+
+                        <!-- Projects that reference this package, with the version each
+                             has installed (issue #33) -->
+                        <Expander Header="Installed in projects"
+                                  IsExpanded="True"
+                                  Margin="0,0,0,4"
+                                  Visibility="{Binding Detail.HasProjectMemberships, Converter={StaticResource BoolToVis}}">
+                            <ItemsControl ItemsSource="{Binding Detail.ProjectMemberships}" Margin="12,2,0,4">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Orientation="Horizontal" Margin="0,1">
+                                            <imaging:CrispImage Width="14" Height="14"
+                                                                Moniker="{x:Static catalog:KnownMonikers.CSProjectNode}"
+                                                                VerticalAlignment="Center" />
+                                            <TextBox Text="{Binding DisplayText, Mode=OneWay}"
+                                                       Style="{StaticResource SelectableTextStyle}"
+                                                       TextWrapping="NoWrap"
+                                                       Margin="6,0,0,0"
+                                                       VerticalAlignment="Center" />
+                                            <TextBox Text="{Binding InstalledVersion, Mode=OneWay}"
+                                                       Style="{StaticResource SelectableMutedTextStyle}"
+                                                       TextWrapping="NoWrap"
                                                        Margin="6,0,0,0"
                                                        VerticalAlignment="Center" />
                                         </StackPanel>
@@ -934,8 +992,9 @@
                                             <ItemsControl ItemsSource="{Binding Items}" Margin="12,0,0,0">
                                                 <ItemsControl.ItemTemplate>
                                                     <DataTemplate>
-                                                        <TextBlock Text="{Binding NameAndVersion}"
-                                                               Style="{StaticResource MutedTextStyle}"
+                                                        <TextBox Text="{Binding NameAndVersion, Mode=OneWay}"
+                                                               Style="{StaticResource SelectableMutedTextStyle}"
+                                                               TextWrapping="NoWrap"
                                                                Margin="0,1" />
                                                     </DataTemplate>
                                                 </ItemsControl.ItemTemplate>

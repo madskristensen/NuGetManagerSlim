@@ -371,6 +371,69 @@ namespace NuGetManagerSlim.Tests.ViewModels
             Assert.True(vm.HasProjectUrl);
             Assert.Equal("https://example.com", vm.ProjectUrl);
         }
+
+        [Fact]
+        public async Task LoadAsync_PopulatesProjectMemberships_OnlyForReferencingProjects()
+        {
+            var (vm, _, projMock, _) = CreateViewModel();
+            projMock.Setup(p => p.GetInstalledVersionsPerProjectAsync(
+                    It.IsAny<ProjectScopeModel>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new Dictionary<string, NuGetVersion?>
+                {
+                    [@"C:\sln\A\A.csproj"] = NuGetVersion.Parse("1.0.0"),
+                    [@"C:\sln\B\B.csproj"] = NuGetVersion.Parse("2.0.0"),
+                    [@"C:\sln\C\C.csproj"] = null,
+                });
+
+            var scope = new ProjectScopeModel
+            {
+                DisplayName = "MySolution",
+                ScopeKind = ProjectScopeKind.Solution,
+                ProjectFullPaths = new[] { @"C:\sln\A\A.csproj", @"C:\sln\B\B.csproj", @"C:\sln\C\C.csproj" },
+            };
+            await vm.LoadAsync(MakeRow(), scope, false, CancellationToken.None);
+
+            Assert.True(vm.HasProjectMemberships);
+            Assert.Equal(2, vm.ProjectMemberships.Count);
+            Assert.DoesNotContain(vm.ProjectMemberships, m => m.DisplayText == "C");
+
+            var a = vm.ProjectMemberships.Single(m => m.DisplayText == "A");
+            Assert.Equal(@"C:\sln\A\A.csproj", a.ProjectFullPath);
+            Assert.Equal("1.0.0", a.InstalledVersion);
+        }
+
+        [Fact]
+        public async Task LoadAsync_NoReferencingProjects_LeavesMembershipsEmpty()
+        {
+            var (vm, _, projMock, _) = CreateViewModel();
+            projMock.Setup(p => p.GetInstalledVersionsPerProjectAsync(
+                    It.IsAny<ProjectScopeModel>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new Dictionary<string, NuGetVersion?>
+                {
+                    [@"C:\sln\A\A.csproj"] = null,
+                });
+
+            await vm.LoadAsync(MakeRow(), new ProjectScopeModel { DisplayName = "MyApp", ProjectFullPath = @"C:\x\x.csproj" }, false, CancellationToken.None);
+
+            Assert.False(vm.HasProjectMemberships);
+            Assert.Empty(vm.ProjectMemberships);
+        }
+
+        [Fact]
+        public async Task LoadAsync_OrdersProjectMembershipsByName()
+        {
+            var (vm, _, projMock, _) = CreateViewModel();
+            projMock.Setup(p => p.GetInstalledVersionsPerProjectAsync(
+                    It.IsAny<ProjectScopeModel>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new Dictionary<string, NuGetVersion?>
+                {
+                    [@"C:\sln\Zebra\Zebra.csproj"] = NuGetVersion.Parse("1.0.0"),
+                    [@"C:\sln\Alpha\Alpha.csproj"] = NuGetVersion.Parse("1.0.0"),
+                });
+
+            await vm.LoadAsync(MakeRow(), new ProjectScopeModel { DisplayName = "MyApp", ProjectFullPath = @"C:\x\x.csproj" }, false, CancellationToken.None);
+
+            Assert.Equal(new[] { "Alpha", "Zebra" }, vm.ProjectMemberships.Select(m => m.DisplayText).ToArray());
+        }
     }
 }
-

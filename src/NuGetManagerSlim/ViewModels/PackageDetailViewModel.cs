@@ -42,6 +42,7 @@ namespace NuGetManagerSlim.ViewModels
         [ObservableProperty] private string _deprecationReason = string.Empty;
         [ObservableProperty] private bool _hasDeprecationReason;
         [ObservableProperty] private bool _hasRequiredByPackages;
+        [ObservableProperty] private bool _hasProjectMemberships;
         [ObservableProperty] private NuGetVersion? _selectedVersion;
         [ObservableProperty] private VersionListItem? _selectedVersionItem;
         [ObservableProperty] private bool _canInstall;
@@ -95,11 +96,19 @@ namespace NuGetManagerSlim.ViewModels
             DeprecationReason = string.Empty;
             HasDeprecationReason = false;
             ProjectMemberships.Clear();
+            HasProjectMemberships = false;
 
             // Surface which direct packages pull in this one when it's transitive.
             var requiredBy = row.RequiredByPackageIds;
             _requiredByPackages.ReplaceAll(requiredBy);
             HasRequiredByPackages = row.IsTransitive && requiredBy.Count > 0;
+
+            // List the projects that actually reference this package, with the
+            // version each has installed (issue #33). Loaded off the critical
+            // path so the detail pane still appears as soon as feed metadata is
+            // ready; the bound ObservableCollection fills in when the per-project
+            // scan completes.
+            _ = LoadProjectMembershipsAsync(row.PackageId, scope, cancellationToken);
 
             // Load versions
             var versions = await _feedService.GetVersionsAsync(row.PackageId, includePrerelease, cancellationToken);
@@ -137,6 +146,50 @@ namespace NuGetManagerSlim.ViewModels
             CanUpdate = hasProjectTarget && row.HasUpdate;
             CanUninstall = hasProjectTarget && row.IsInstalled && !row.IsTransitive;
             CanUpdateAllProjects = false;
+        }
+
+        // Populates <see cref="ProjectMemberships"/> with the projects in the
+        // current scope that reference this package, each annotated with the
+        // version it has installed (issue #33). Projects that don't reference
+        // the package are filtered out so the section is a pure "referenced by"
+        // list. Best-effort: a failed or cancelled scan simply leaves the list
+        // empty rather than disrupting the rest of the detail pane.
+        private async Task LoadProjectMembershipsAsync(string packageId, ProjectScopeModel? scope, CancellationToken cancellationToken)
+        {
+            if (scope == null || string.IsNullOrEmpty(packageId))
+                return;
+
+            try
+            {
+                var installedByProject = await _projectService
+                    .GetInstalledVersionsPerProjectAsync(scope, packageId, cancellationToken)
+                    .ConfigureAwait(true);
+
+                if (installedByProject == null || cancellationToken.IsCancellationRequested)
+                    return;
+
+                var rows = installedByProject
+                    .Where(kvp => kvp.Value != null)
+                    .Select(kvp => new ProjectMembershipViewModel
+                    {
+                        DisplayText = System.IO.Path.GetFileNameWithoutExtension(kvp.Key),
+                        ProjectFullPath = kvp.Key,
+                        InstalledVersion = kvp.Value!.ToString(),
+                    })
+                    .OrderBy(r => r.DisplayText, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                ProjectMemberships.Clear();
+                foreach (var membership in rows)
+                    ProjectMemberships.Add(membership);
+
+                HasProjectMemberships = ProjectMemberships.Count > 0;
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex)
+            {
+                await ex.LogAsync();
+            }
         }
 
         partial void OnSelectedVersionChanged(NuGetVersion? value)
