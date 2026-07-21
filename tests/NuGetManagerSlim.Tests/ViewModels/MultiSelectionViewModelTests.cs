@@ -16,7 +16,8 @@ namespace NuGetManagerSlim.Tests.ViewModels
             string id,
             string? installed = null,
             string? latestStable = null,
-            bool isTransitive = false)
+            bool isTransitive = false,
+            bool isCentralTransitivePin = false)
         {
             return new PackageRowViewModel(new PackageModel
             {
@@ -24,6 +25,7 @@ namespace NuGetManagerSlim.Tests.ViewModels
                 InstalledVersion = installed != null ? NuGetVersion.Parse(installed) : null,
                 LatestStableVersion = latestStable != null ? NuGetVersion.Parse(latestStable) : null,
                 IsTransitive = isTransitive,
+                IsCentralTransitivePin = isCentralTransitivePin,
             });
         }
 
@@ -183,6 +185,37 @@ namespace NuGetManagerSlim.Tests.ViewModels
 
             proj.Verify(p => p.UpdatePackageAsync(@"C:\App\App.csproj", "A", NuGetVersion.Parse("2.0.0"), It.IsAny<CancellationToken>()), Times.Once);
             proj.Verify(p => p.UpdatePackageAsync(It.IsAny<string>(), "B", It.IsAny<NuGetVersion>(), It.IsAny<CancellationToken>()), Times.Never);
+        }
+
+        [Fact]
+        public async Task UpdateAsync_CentralTransitivePin_UpdatesCentralVersionOnly()
+        {
+            var rows = new[]
+            {
+                MakeRow(
+                    "Pinned",
+                    installed: "1.0.0",
+                    latestStable: "2.0.0",
+                    isTransitive: true,
+                    isCentralTransitivePin: true),
+            };
+            var proj = new Mock<IProjectService>();
+            var scope = new ProjectScopeModel
+            {
+                DisplayName = "App",
+                ProjectFullPath = @"C:\App\App.csproj",
+            };
+            var vm = new MultiSelectionViewModel(rows, scope, proj.Object, _ => { }, null);
+
+            await vm.UpdateCommand.ExecuteAsync(null);
+
+            proj.Verify(
+                p => p.UpdatePackageAsync(
+                    @"C:\App\App.csproj",
+                    "Pinned",
+                    NuGetVersion.Parse("2.0.0"),
+                    It.IsAny<CancellationToken>()),
+                Times.Once);
         }
 
         [Fact]

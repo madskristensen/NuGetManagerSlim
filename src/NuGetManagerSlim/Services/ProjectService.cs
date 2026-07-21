@@ -18,6 +18,10 @@ namespace NuGetManagerSlim.Services
 {
     public sealed class ProjectService : IProjectService
     {
+        private readonly object _assetsCacheGate = new();
+        private readonly Dictionary<string, AssetsCacheEntry> _assetsCache =
+            new(StringComparer.OrdinalIgnoreCase);
+
         private static bool IsManagedDotNetProject(string? fullPath)
         {
             if (string.IsNullOrEmpty(fullPath)) return false;
@@ -400,6 +404,21 @@ namespace NuGetManagerSlim.Services
                         break;
                     }
                 }
+
+                if (version == null)
+                {
+                    var transitive = await ReadTransitivesForProjectAsync(projectPath, cancellationToken).ConfigureAwait(false);
+                    foreach (var pkg in transitive)
+                    {
+                        if (pkg.IsCentralTransitivePin
+                            && string.Equals(pkg.PackageId, packageId, StringComparison.OrdinalIgnoreCase))
+                        {
+                            version = pkg.InstalledVersion;
+                            break;
+                        }
+                    }
+                }
+
                 result[projectPath] = version;
             }
 
@@ -583,25 +602,68 @@ namespace NuGetManagerSlim.Services
                     byId[pkg.PackageId] = current.WithReferencingFrameworks(new List<string>(frameworkUnion));
                 }
             }
+
+            if ((existing.IsCentralTransitivePin || pkg.IsCentralTransitivePin)
+                && !byId[pkg.PackageId].IsCentralTransitivePin)
+            {
+                byId[pkg.PackageId] = byId[pkg.PackageId].WithCentralTransitivePin();
+            }
         }
 
         private async Task<IReadOnlyList<PackageModel>> ReadTransitivesForProjectAsync(
             string projectPath,
             CancellationToken cancellationToken)
         {
+            var snapshot = await ReadAssetsSnapshotAsync(projectPath, cancellationToken).ConfigureAwait(false);
+            return snapshot?.Packages ?? [];
+        }
+
+        private async Task<AssetsSnapshot?> ReadAssetsSnapshotAsync(
+            string projectPath,
+            CancellationToken cancellationToken)
+        {
             var projectDir = Path.GetDirectoryName(projectPath);
-            if (string.IsNullOrEmpty(projectDir)) return [];
+            if (string.IsNullOrEmpty(projectDir)) return null;
 
             var assetsPath = Path.Combine(projectDir!, "obj", "project.assets.json");
-            if (!File.Exists(assetsPath)) return [];
+            if (!File.Exists(assetsPath)) return null;
 
             cancellationToken.ThrowIfCancellationRequested();
+
+            var before = new FileInfo(assetsPath);
+            var length = before.Length;
+            var lastWriteTimeUtc = before.LastWriteTimeUtc;
+            lock (_assetsCacheGate)
+            {
+                if (_assetsCache.TryGetValue(assetsPath, out var cached)
+                    && cached.Length == length
+                    && cached.LastWriteTimeUtc == lastWriteTimeUtc)
+                {
+                    return cached.Snapshot;
+                }
+            }
 
             using var fs = new FileStream(assetsPath, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, useAsync: true);
             using var doc = await JsonDocument.ParseAsync(fs, default, cancellationToken).ConfigureAwait(false);
 
             var projectName = Path.GetFileNameWithoutExtension(projectPath);
-            return ParseTransitivesFromAssets(doc.RootElement, projectName, cancellationToken);
+            var snapshot = ParseAssetsSnapshot(doc.RootElement, projectName, cancellationToken);
+
+            var after = new FileInfo(assetsPath);
+            if (after.Exists
+                && after.Length == length
+                && after.LastWriteTimeUtc == lastWriteTimeUtc)
+            {
+                lock (_assetsCacheGate)
+                {
+                    _assetsCache[assetsPath] = new AssetsCacheEntry(
+                        length,
+                        lastWriteTimeUtc,
+                        snapshot);
+                }
+            }
+
+            return snapshot;
         }
 
         // Builds the transitive-dependency list from a parsed project.assets.json
@@ -612,19 +674,41 @@ namespace NuGetManagerSlim.Services
             string projectName,
             CancellationToken cancellationToken)
         {
+            return ParseAssetsSnapshot(root, projectName, cancellationToken).Packages;
+        }
+
+        private static AssetsSnapshot ParseAssetsSnapshot(
+            JsonElement root,
+            string projectName,
+            CancellationToken cancellationToken)
+        {
             var direct = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var projectFrameworks = new List<string>();
             if (root.TryGetProperty("project", out var projectEl)
                 && projectEl.TryGetProperty("frameworks", out var fws)
                 && fws.ValueKind == JsonValueKind.Object)
             {
                 foreach (var fw in fws.EnumerateObject())
                 {
+                    projectFrameworks.Add(fw.Name);
                     if (fw.Value.TryGetProperty("dependencies", out var deps)
                         && deps.ValueKind == JsonValueKind.Object)
                     {
                         foreach (var d in deps.EnumerateObject())
                             direct.Add(d.Name);
                     }
+                }
+            }
+
+            var centralTransitivePins = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (root.TryGetProperty("centralTransitiveDependencyGroups", out var centralGroups)
+                && centralGroups.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var frameworkGroup in centralGroups.EnumerateObject())
+                {
+                    if (frameworkGroup.Value.ValueKind != JsonValueKind.Object) continue;
+                    foreach (var package in frameworkGroup.Value.EnumerateObject())
+                        centralTransitivePins.Add(package.Name);
                 }
             }
 
@@ -672,7 +756,6 @@ namespace NuGetManagerSlim.Services
                             }
                         }
                     }
-                    break;
                 }
             }
 
@@ -687,13 +770,46 @@ namespace NuGetManagerSlim.Services
                     PackageId = kvp.Value.Id,
                     InstalledVersion = kvp.Value.Version,
                     IsTransitive = true,
+                    IsCentralTransitivePin = centralTransitivePins.Contains(kvp.Key),
                     RequiredByPackageId = ancestors.Count > 0 ? ancestors[0] : null,
                     RequiredByPackageIds = ancestors,
+                    ReferencingFrameworks = projectFrameworks,
                     SourceName = projectName,
                 });
             }
 
-            return result;
+            return new AssetsSnapshot(result, centralTransitivePins);
+        }
+
+        private sealed class AssetsSnapshot
+        {
+            public AssetsSnapshot(
+                IReadOnlyList<PackageModel> packages,
+                HashSet<string> centralTransitivePins)
+            {
+                Packages = packages;
+                CentralTransitivePins = centralTransitivePins;
+            }
+
+            public IReadOnlyList<PackageModel> Packages { get; }
+            public HashSet<string> CentralTransitivePins { get; }
+        }
+
+        private sealed class AssetsCacheEntry
+        {
+            public AssetsCacheEntry(
+                long length,
+                DateTime lastWriteTimeUtc,
+                AssetsSnapshot snapshot)
+            {
+                Length = length;
+                LastWriteTimeUtc = lastWriteTimeUtc;
+                Snapshot = snapshot;
+            }
+
+            public long Length { get; }
+            public DateTime LastWriteTimeUtc { get; }
+            public AssetsSnapshot Snapshot { get; }
         }
 
         private sealed class TransitiveNode
@@ -756,9 +872,112 @@ namespace NuGetManagerSlim.Services
             await SaveProjectAsync(project);
         }
 
-        public Task UpdatePackageAsync(string projectPath, string packageId, NuGetVersion version, CancellationToken cancellationToken)
+        public async Task UpdatePackageAsync(
+            string projectPath,
+            string packageId,
+            NuGetVersion version,
+            CancellationToken cancellationToken)
         {
-            return InstallPackageAsync(projectPath, packageId, version, cancellationToken);
+            if (await IsCentralTransitivePinAsync(projectPath, packageId, cancellationToken).ConfigureAwait(false))
+            {
+                await Task.Run(
+                    () => UpdateCentralPackageVersion(projectPath, packageId, version, cancellationToken),
+                    cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            await InstallPackageAsync(projectPath, packageId, version, cancellationToken);
+        }
+
+        private async Task<bool> IsCentralTransitivePinAsync(
+            string projectPath,
+            string packageId,
+            CancellationToken cancellationToken)
+        {
+            var snapshot = await ReadAssetsSnapshotAsync(projectPath, cancellationToken).ConfigureAwait(false);
+            return snapshot?.CentralTransitivePins.Contains(packageId) == true;
+        }
+
+        private static void UpdateCentralPackageVersion(
+            string projectPath,
+            string packageId,
+            NuGetVersion version,
+            CancellationToken cancellationToken)
+        {
+            var projectDir = Path.GetDirectoryName(projectPath);
+            if (string.IsNullOrEmpty(projectDir))
+                throw new InvalidOperationException($"Could not locate Directory.Packages.props for '{projectPath}'.");
+
+            var matches = new List<(string Path, XDocument Document, XElement Entry)>();
+            var dir = new DirectoryInfo(projectDir);
+            while (dir != null)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var candidate = Path.Combine(dir.FullName, "Directory.Packages.props");
+                if (File.Exists(candidate))
+                {
+                    var candidateDoc = XDocument.Load(candidate, LoadOptions.PreserveWhitespace);
+                    var candidateMatches = candidateDoc.Descendants()
+                        .Where(e => e.Name.LocalName == "PackageVersion")
+                        .Where(e => string.Equals(
+                            (string?)e.Attribute("Include") ?? (string?)e.Attribute("Update"),
+                            packageId,
+                            StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+                    foreach (var candidateEntry in candidateMatches)
+                    {
+                        matches.Add((candidate, candidateDoc, candidateEntry));
+                    }
+
+                    if (candidateMatches.Count > 0)
+                        break;
+
+                    var importsParentPackagesFile = candidateDoc.Descendants()
+                        .Where(e => e.Name.LocalName == "Import")
+                        .Select(e => (string?)e.Attribute("Project"))
+                        .Any(p => p?.IndexOf("Directory.Packages.props", StringComparison.OrdinalIgnoreCase) >= 0);
+                    if (!importsParentPackagesFile)
+                        break;
+                }
+                dir = dir.Parent;
+            }
+
+            if (matches.Count == 0)
+                throw new InvalidOperationException($"Could not find a central version for '{packageId}' above '{projectPath}'.");
+            if (matches.Count > 1)
+                throw new InvalidOperationException($"Multiple central versions for '{packageId}' were found above '{projectPath}'. Update them explicitly.");
+
+            var match = matches[0];
+            var entry = match.Entry;
+            if (entry.AncestorsAndSelf().Any(e => e.Attribute("Condition") != null))
+                throw new InvalidOperationException($"The central version for '{packageId}' in '{match.Path}' is conditional. Update it explicitly.");
+
+            var versionValue = version.ToNormalizedString();
+            var versionAttribute = entry.Attribute("Version");
+            if (versionAttribute != null)
+            {
+                if (ContainsMsBuildExpression(versionAttribute.Value))
+                    throw new InvalidOperationException($"The central version for '{packageId}' in '{match.Path}' uses an MSBuild expression. Update it explicitly.");
+                versionAttribute.Value = versionValue;
+            }
+            else
+            {
+                var versionElement = entry.Elements().FirstOrDefault(e => e.Name.LocalName == "Version");
+                if (versionElement == null)
+                    throw new InvalidOperationException($"The central version for '{packageId}' in '{match.Path}' has no Version value.");
+                if (ContainsMsBuildExpression(versionElement.Value))
+                    throw new InvalidOperationException($"The central version for '{packageId}' in '{match.Path}' uses an MSBuild expression. Update it explicitly.");
+                versionElement.Value = versionValue;
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            match.Document.Save(match.Path, SaveOptions.DisableFormatting);
+        }
+
+        private static bool ContainsMsBuildExpression(string value)
+        {
+            return value.IndexOf("$(", StringComparison.Ordinal) >= 0
+                || value.IndexOf("@(", StringComparison.Ordinal) >= 0;
         }
 
         public async Task UninstallPackageAsync(string projectPath, string packageId, CancellationToken cancellationToken)

@@ -106,7 +106,11 @@ namespace NuGetManagerSlim.ViewModels
                 if (version == null) { fail++; continue; }
                 try
                 {
-                    await _projectService.UpdatePackageAsync(_projectFullPath!, row.PackageId, version, cancellationToken);
+                    await _projectService.UpdatePackageAsync(
+                        _projectFullPath!,
+                        row.PackageId,
+                        version,
+                        cancellationToken);
                     ok++;
                 }
                 catch (Exception ex)

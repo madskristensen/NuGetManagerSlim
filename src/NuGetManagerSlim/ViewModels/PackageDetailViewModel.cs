@@ -307,7 +307,11 @@ namespace NuGetManagerSlim.ViewModels
             try
             {
                 _reportStatus($"Updating {PackageId} to {SelectedVersion}\u2026");
-                await _projectService.UpdatePackageAsync(_projectFullPath!, PackageId, SelectedVersion, cancellationToken);
+                await _projectService.UpdatePackageAsync(
+                    _projectFullPath!,
+                    PackageId,
+                    SelectedVersion,
+                    cancellationToken);
                 _reportStatus($"\u2713 Updated {PackageId} \u2192 {SelectedVersion}");
                 if (_onChanged != null) await _onChanged();
             }

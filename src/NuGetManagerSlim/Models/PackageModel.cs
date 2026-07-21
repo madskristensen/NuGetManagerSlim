@@ -30,6 +30,11 @@ namespace NuGetManagerSlim.Models
         public long DownloadCount { get; init; }
         public string? SourceName { get; init; }
         public bool IsTransitive { get; init; }
+
+        // NuGet promoted this transitive dependency because its central version
+        // is pinned. It remains transitive in the project file, but can be updated
+        // by changing its PackageVersion entry.
+        public bool IsCentralTransitivePin { get; init; }
         public string? RequiredByPackageId { get; init; }
 
         // Target-framework moniker(s) of the project(s) that reference this
@@ -89,6 +94,7 @@ namespace NuGetManagerSlim.Models
             DownloadCount = DownloadCount,
             SourceName = SourceName,
             IsTransitive = IsTransitive,
+            IsCentralTransitivePin = IsCentralTransitivePin,
             RequiredByPackageId = RequiredByPackageId,
             RequiredByPackageIds = RequiredByPackageIds,
             ReferencingFrameworks = ReferencingFrameworks,
@@ -122,6 +128,7 @@ namespace NuGetManagerSlim.Models
             DownloadCount = DownloadCount,
             SourceName = SourceName,
             IsTransitive = IsTransitive,
+            IsCentralTransitivePin = IsCentralTransitivePin,
             RequiredByPackageId = requiredByPackageIds.Count > 0 ? requiredByPackageIds[0] : RequiredByPackageId,
             RequiredByPackageIds = requiredByPackageIds,
             ReferencingFrameworks = ReferencingFrameworks,
@@ -156,9 +163,41 @@ namespace NuGetManagerSlim.Models
             DownloadCount = DownloadCount,
             SourceName = SourceName,
             IsTransitive = IsTransitive,
+            IsCentralTransitivePin = IsCentralTransitivePin,
             RequiredByPackageId = RequiredByPackageId,
             RequiredByPackageIds = RequiredByPackageIds,
             ReferencingFrameworks = referencingFrameworks,
+            ReadmeUrl = ReadmeUrl,
+            ProjectUrl = ProjectUrl,
+            IconUrl = IconUrl,
+            Published = Published,
+            PerFrameworkVersions = PerFrameworkVersions,
+            Dependencies = Dependencies,
+            Vulnerabilities = Vulnerabilities,
+            IsDeprecated = IsDeprecated,
+            DeprecationReason = DeprecationReason,
+            AllowedVersionRange = AllowedVersionRange,
+        };
+
+        internal PackageModel WithCentralTransitivePin() => new PackageModel
+        {
+            PackageId = PackageId,
+            InstalledVersion = InstalledVersion,
+            LatestStableVersion = LatestStableVersion,
+            LatestPrereleaseVersion = LatestPrereleaseVersion,
+            MaxStableByMajor = MaxStableByMajor,
+            MaxPrereleaseByMajor = MaxPrereleaseByMajor,
+            Description = Description,
+            Authors = Authors,
+            LicenseExpression = LicenseExpression,
+            LicenseUrl = LicenseUrl,
+            DownloadCount = DownloadCount,
+            SourceName = SourceName,
+            IsTransitive = IsTransitive,
+            IsCentralTransitivePin = true,
+            RequiredByPackageId = RequiredByPackageId,
+            RequiredByPackageIds = RequiredByPackageIds,
+            ReferencingFrameworks = ReferencingFrameworks,
             ReadmeUrl = ReadmeUrl,
             ProjectUrl = ProjectUrl,
             IconUrl = IconUrl,

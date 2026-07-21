@@ -63,6 +63,7 @@ namespace NuGetManagerSlim.ViewModels
                 DownloadCount = _model.DownloadCount > 0 ? _model.DownloadCount : metadata.DownloadCount,
                 SourceName = _model.SourceName,
                 IsTransitive = _model.IsTransitive,
+                IsCentralTransitivePin = _model.IsCentralTransitivePin,
                 RequiredByPackageId = _model.RequiredByPackageId,
                 RequiredByPackageIds = _model.RequiredByPackageIds,
                 ReadmeUrl = _model.ReadmeUrl ?? metadata.ReadmeUrl,
@@ -98,6 +99,8 @@ namespace NuGetManagerSlim.ViewModels
         public bool IsInstalled => _model.InstalledVersion != null;
 
         public bool IsTransitive => _model.IsTransitive;
+
+        public bool IsCentralTransitivePin => _model.IsCentralTransitivePin;
 
         public bool IsPrerelease => _model.LatestPrereleaseVersion?.IsPrerelease == true
                                     && _model.LatestStableVersion == null;
@@ -220,7 +223,7 @@ namespace NuGetManagerSlim.ViewModels
         }
 
         public bool HasUpdate => IsInstalled
-            && !IsTransitive
+            && (!IsTransitive || IsCentralTransitivePin)
             && UpdateCandidateVersion != null
             && UpdateCandidateVersion > _model.InstalledVersion;
 

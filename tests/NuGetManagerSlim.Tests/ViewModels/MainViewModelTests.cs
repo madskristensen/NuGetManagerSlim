@@ -457,6 +457,58 @@ namespace NuGetManagerSlim.Tests.ViewModels
         }
 
         [Fact]
+        public async Task UpdatesView_IncludesCentralTransitivePinButNotOrdinaryTransitive()
+        {
+            var pinnedVersion = NuGetVersion.Parse("1.0.0");
+            var projMock = new Mock<IProjectService>();
+            var feedMock = new Mock<INuGetFeedService>();
+            var restoreMock = new Mock<IRestoreMonitorService>();
+
+            feedMock.Setup(f => f.GetSourcesAsync(It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<PackageSourceModel>());
+            projMock.Setup(p => p.GetInstalledPackagesAsync(It.IsAny<ProjectScopeModel>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<PackageModel>());
+            projMock.Setup(p => p.GetTransitivePackagesAsync(It.IsAny<ProjectScopeModel>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new List<PackageModel>
+                {
+                    new()
+                    {
+                        PackageId = "Pinned",
+                        InstalledVersion = pinnedVersion,
+                        IsTransitive = true,
+                        IsCentralTransitivePin = true,
+                    },
+                    new()
+                    {
+                        PackageId = "Ordinary",
+                        InstalledVersion = pinnedVersion,
+                        IsTransitive = true,
+                    },
+                });
+            feedMock.Setup(f => f.GetInstalledEnrichmentAsync("Pinned", pinnedVersion, It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new InstalledEnrichment
+                {
+                    Latest = new PackageModel
+                    {
+                        PackageId = "Pinned",
+                        LatestStableVersion = NuGetVersion.Parse("2.0.0"),
+                    },
+                });
+
+            var vm = new MainViewModel(projMock.Object, feedMock.Object, restoreMock.Object);
+            await vm.InitializeAsync(CancellationToken.None);
+            await vm.SetCurrentProjectAsync(@"C:\MyApp\MyApp.csproj", "MyApp");
+            vm.ViewMode = PackageViewMode.Updates;
+
+            for (int i = 0; i < 200 && vm.IsLoading; i++)
+                await Task.Delay(10);
+
+            var pinned = Assert.Single(vm.Packages, p => p.PackageId == "Pinned");
+            Assert.True(pinned.HasUpdate);
+            Assert.DoesNotContain(vm.Packages, p => p.PackageId == "Ordinary");
+        }
+
+        [Fact]
         public void ViewMode_SetToBrowse_ClearsFilters()
         {
             var (vm, _, _, _) = CreateViewModel();

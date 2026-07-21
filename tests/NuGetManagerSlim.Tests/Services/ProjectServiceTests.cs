@@ -1,7 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Threading;
+using System.Threading.Tasks;
+using NuGet.Versioning;
+using NuGetManagerSlim.Models;
 using NuGetManagerSlim.Services;
 using Xunit;
 
@@ -338,6 +343,221 @@ namespace NuGetManagerSlim.Tests.Services
             Assert.Equal(new[] { "Root" }, leaf.RequiredByPackageIds);
             var mid = Assert.Single(transitives, p => p.PackageId == "Mid");
             Assert.Equal(new[] { "Root" }, mid.RequiredByPackageIds);
+        }
+
+        [Fact]
+        public void ParseTransitives_CentralTransitiveDependency_IsMarkedAsPinned()
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse("""
+                {
+                  "project": {
+                    "frameworks": {
+                      "net8.0": {
+                        "dependencies": { "Root": { "target": "Package" } }
+                      }
+                    }
+                  },
+                  "targets": {
+                    "net8.0": {
+                      "Root/1.0.0": {
+                        "type": "package",
+                        "dependencies": {
+                          "Pinned": "1.0.0",
+                          "Ordinary": "1.0.0"
+                        }
+                      },
+                      "Pinned/1.0.0": { "type": "package" },
+                      "Ordinary/1.0.0": { "type": "package" }
+                    }
+                  },
+                  "centralTransitiveDependencyGroups": {
+                    "net8.0": {
+                      "Pinned": {
+                        "include": "Runtime, Compile",
+                        "version": "[1.0.0, )"
+                      }
+                    }
+                  }
+                }
+                """);
+
+            var transitives = ProjectService.ParseTransitivesFromAssets(doc.RootElement, "App", CancellationToken.None);
+
+            Assert.True(Assert.Single(transitives, p => p.PackageId == "Pinned").IsCentralTransitivePin);
+            Assert.False(Assert.Single(transitives, p => p.PackageId == "Ordinary").IsCentralTransitivePin);
+        }
+
+        [Fact]
+        public void ParseTransitives_CentralPinInLaterFramework_IsIncludedAndCarriesFrameworks()
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse("""
+                {
+                  "project": {
+                    "frameworks": {
+                      "net8.0": {
+                        "dependencies": { "Root8": { "target": "Package" } }
+                      },
+                      "net9.0": {
+                        "dependencies": { "Root9": { "target": "Package" } }
+                      }
+                    }
+                  },
+                  "targets": {
+                    "net8.0": {
+                      "Root8/1.0.0": { "type": "package" }
+                    },
+                    "net9.0": {
+                      "Root9/1.0.0": {
+                        "type": "package",
+                        "dependencies": { "Pinned": "1.0.0" }
+                      },
+                      "Pinned/1.0.0": { "type": "package" }
+                    }
+                  },
+                  "centralTransitiveDependencyGroups": {
+                    "net9.0": {
+                      "Pinned": { "version": "[1.0.0, )" }
+                    }
+                  }
+                }
+                """);
+
+            var transitives = ProjectService.ParseTransitivesFromAssets(doc.RootElement, "App", CancellationToken.None);
+
+            var pinned = Assert.Single(transitives, p => p.PackageId == "Pinned");
+            Assert.True(pinned.IsCentralTransitivePin);
+            Assert.Equal(new[] { "net8.0", "net9.0" }, pinned.ReferencingFrameworks);
+        }
+
+        [Fact]
+        public async System.Threading.Tasks.Task GetTransitivePackagesAsync_CachesUntilAssetsFileChanges()
+        {
+            var projectDir = Path.Combine(_tempDir, "CachedApp");
+            var objDir = Path.Combine(projectDir, "obj");
+            Directory.CreateDirectory(objDir);
+            var projectPath = Path.Combine(projectDir, "CachedApp.csproj");
+            File.WriteAllText(projectPath, "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+            var assetsPath = Path.Combine(objDir, "project.assets.json");
+
+            static string CreateAssets(string packageId) => $$"""
+                {
+                  "project": {
+                    "frameworks": {
+                      "net8.0": {
+                        "dependencies": { "Root": { "target": "Package" } }
+                      }
+                    }
+                  },
+                  "targets": {
+                    "net8.0": {
+                      "Root/1.0.0": {
+                        "type": "package",
+                        "dependencies": { "{{packageId}}": "1.0.0" }
+                      },
+                      "{{packageId}}/1.0.0": { "type": "package" }
+                    }
+                  }
+                }
+                """;
+
+            var originalStamp = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            File.WriteAllText(assetsPath, CreateAssets("PinnedA"));
+            File.SetLastWriteTimeUtc(assetsPath, originalStamp);
+
+            static Task<IReadOnlyList<PackageModel>> ReadAsync(
+                ProjectService service,
+                string path)
+            {
+                var method = typeof(ProjectService).GetMethod(
+                    "ReadTransitivesForProjectAsync",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                return (Task<IReadOnlyList<PackageModel>>)method!.Invoke(
+                    service,
+                    new object[] { path, CancellationToken.None })!;
+            }
+
+            var service = new ProjectService();
+
+            var first = await ReadAsync(service, projectPath);
+            Assert.Contains(first, p => p.PackageId == "PinnedA");
+
+            File.WriteAllText(assetsPath, CreateAssets("PinnedB"));
+            File.SetLastWriteTimeUtc(assetsPath, originalStamp);
+
+            var cached = await ReadAsync(service, projectPath);
+            Assert.Contains(cached, p => p.PackageId == "PinnedA");
+            Assert.DoesNotContain(cached, p => p.PackageId == "PinnedB");
+
+            File.SetLastWriteTimeUtc(assetsPath, originalStamp.AddSeconds(1));
+
+            var refreshed = await ReadAsync(service, projectPath);
+            Assert.Contains(refreshed, p => p.PackageId == "PinnedB");
+            Assert.DoesNotContain(refreshed, p => p.PackageId == "PinnedA");
+        }
+
+        [Fact]
+        public async System.Threading.Tasks.Task UpdatePackageAsync_CentralTransitivePin_UpdatesPropsWithoutAddingReference()
+        {
+            var projectDir = Path.Combine(_tempDir, "PinnedApp");
+            var objDir = Path.Combine(projectDir, "obj");
+            Directory.CreateDirectory(objDir);
+            var projectPath = Path.Combine(projectDir, "PinnedApp.csproj");
+            const string projectContents = """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup>
+                  <ItemGroup><PackageReference Include="Root" /></ItemGroup>
+                </Project>
+                """;
+            File.WriteAllText(projectPath, projectContents);
+            File.WriteAllText(Path.Combine(projectDir, "Directory.Packages.props"), """
+                <Project>
+                  <Import Project="..\Directory.Packages.props" />
+                </Project>
+                """);
+            var packagesPath = Path.Combine(_tempDir, "Directory.Packages.props");
+            File.WriteAllText(packagesPath, """
+                <Project>
+                  <PropertyGroup>
+                    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+                    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+                  </PropertyGroup>
+                  <ItemGroup>
+                    <PackageVersion Include="Root" Version="1.0.0" />
+                    <PackageVersion Include="Pinned" Version="1.0.0" />
+                  </ItemGroup>
+                </Project>
+                """);
+            File.WriteAllText(Path.Combine(objDir, "project.assets.json"), """
+                {
+                  "project": {
+                    "frameworks": {
+                      "net8.0": {
+                        "dependencies": { "Root": { "target": "Package" } }
+                      }
+                    }
+                  },
+                  "targets": {
+                    "net8.0": {
+                      "Root/1.0.0": { "type": "package", "dependencies": { "Pinned": "1.0.0" } },
+                      "Pinned/1.0.0": { "type": "package" }
+                    }
+                  },
+                  "centralTransitiveDependencyGroups": {
+                    "net8.0": {
+                      "Pinned": { "version": "[1.0.0, )" }
+                    }
+                  }
+                }
+                """);
+
+            await new ProjectService().UpdatePackageAsync(
+                projectPath,
+                "Pinned",
+                NuGetVersion.Parse("1.0.1"),
+                CancellationToken.None);
+
+            Assert.Contains("PackageVersion Include=\"Pinned\" Version=\"1.0.1\"", File.ReadAllText(packagesPath));
+            Assert.Equal(projectContents, File.ReadAllText(projectPath));
         }
 
         [Fact]

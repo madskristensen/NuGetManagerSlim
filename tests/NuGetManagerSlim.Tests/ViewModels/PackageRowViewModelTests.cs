@@ -17,7 +17,8 @@ namespace NuGetManagerSlim.Tests.ViewModels
             string? requiredBy = null,
             string[]? requiredByIds = null,
             string? source = "nuget.org",
-            bool includePrerelease = false)
+            bool includePrerelease = false,
+            bool isCentralTransitivePin = false)
         {
             return new PackageRowViewModel(new PackageModel
             {
@@ -26,6 +27,7 @@ namespace NuGetManagerSlim.Tests.ViewModels
                 LatestStableVersion = latestStable != null ? NuGetVersion.Parse(latestStable) : null,
                 LatestPrereleaseVersion = latestPre != null ? NuGetVersion.Parse(latestPre) : null,
                 IsTransitive = isTransitive,
+                IsCentralTransitivePin = isCentralTransitivePin,
                 RequiredByPackageId = requiredBy,
                 RequiredByPackageIds = requiredByIds ?? (requiredBy != null ? new[] { requiredBy } : System.Array.Empty<string>()),
                 SourceName = source,
@@ -264,6 +266,18 @@ namespace NuGetManagerSlim.Tests.ViewModels
         {
             var vm = MakeRow(installed: "1.0.0", latestStable: "2.0.0", isTransitive: true);
             Assert.False(vm.HasUpdate);
+        }
+
+        [Fact]
+        public void HasUpdate_WhenCentralTransitivePin_ReturnsTrue()
+        {
+            var vm = MakeRow(
+                installed: "1.0.0",
+                latestStable: "2.0.0",
+                isTransitive: true,
+                isCentralTransitivePin: true);
+
+            Assert.True(vm.HasUpdate);
         }
 
         [Fact]

@@ -799,6 +799,20 @@ namespace NuGetManagerSlim.ViewModels
 
                 if (FilterUpdates)
                 {
+                    var transitive = await _projectService
+                        .GetTransitivePackagesAsync(CurrentProject, cancellationToken)
+                        .ConfigureAwait(true);
+                    var seen = new HashSet<string>(rows.Select(r => r.PackageId), StringComparer.OrdinalIgnoreCase);
+                    foreach (var pkg in transitive)
+                    {
+                        if (!pkg.IsCentralTransitivePin) continue;
+                        if (!string.IsNullOrWhiteSpace(searchQuery)
+                            && pkg.PackageId.IndexOf(searchQuery, StringComparison.OrdinalIgnoreCase) < 0)
+                            continue;
+                        if (seen.Add(pkg.PackageId))
+                            rows.Add(CreateRow(pkg));
+                    }
+
                     // HasUpdate depends on LatestStableVersion. Apply any cached
                     // "latest" metadata first (free), then resolve the remaining
                     // rows from the feed. Previously the remote fetch only ran when
@@ -1331,7 +1345,11 @@ namespace NuGetManagerSlim.ViewModels
                 // doesn't manage operation-in-progress state on a row, so we
                 // pass null recordMru and let the picker dialog itself drive
                 // the per-project UX.
-                await FanOutSolutionActionCoreAsync(row.PackageId, action, version, null);
+                await FanOutSolutionActionCoreAsync(
+                    row.PackageId,
+                    action,
+                    version,
+                    null);
             });
 
             try
@@ -1431,7 +1449,11 @@ namespace NuGetManagerSlim.ViewModels
                 else if (!string.IsNullOrEmpty(CurrentProject?.ProjectFullPath))
                 {
                     SetStatus($"Updating {row.PackageId}…");
-                    await _projectService.UpdatePackageAsync(CurrentProject!.ProjectFullPath, row.PackageId, target, CancellationToken.None);
+                    await _projectService.UpdatePackageAsync(
+                        CurrentProject!.ProjectFullPath,
+                        row.PackageId,
+                        target,
+                        CancellationToken.None);
                     RecordMru(row, target);
                     var done = $"✓ Updated {row.PackageId} → {target}";
                     SetStatus(done);
@@ -1528,7 +1550,11 @@ namespace NuGetManagerSlim.ViewModels
             SolutionPackageAction action,
             NuGetVersion? targetVersion)
         {
-            await FanOutSolutionActionCoreAsync(row.PackageId, action, targetVersion, v =>
+            await FanOutSolutionActionCoreAsync(
+                row.PackageId,
+                action,
+                targetVersion,
+                v =>
             {
                 if (v != null) RecordMru(row, v);
             });
@@ -1587,7 +1613,11 @@ namespace NuGetManagerSlim.ViewModels
                             break;
                         case SolutionPackageAction.Update:
                             if (targetVersion != null)
-                                await _projectService.UpdatePackageAsync(sel.ProjectFullPath, packageId, targetVersion, CancellationToken.None);
+                                await _projectService.UpdatePackageAsync(
+                                    sel.ProjectFullPath,
+                                    packageId,
+                                    targetVersion,
+                                    CancellationToken.None);
                             break;
                         case SolutionPackageAction.Uninstall:
                             await _projectService.UninstallPackageAsync(sel.ProjectFullPath, packageId, CancellationToken.None);
